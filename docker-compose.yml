@@ -1,0 +1,73 @@
+version: '3.9'
+
+services:
+  backend:
+    build:
+      context: ./docker/backend
+      dockerfile: Dockerfile
+    container_name: faradyne_backend
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://faradyne:faradyne@db:5432/faradyne
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - UPLOAD_DIR=/tmp/faradyne_uploads
+      - MAX_FILE_SIZE_MB=100
+      - DEBUG=true
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - faradyne_network
+
+  frontend:
+    build:
+      context: ./docker/frontend
+      dockerfile: Dockerfile
+    container_name: faradyne_frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+      - VITE_APP_NAME=FARADYNE
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
+    networks:
+      - faradyne_network
+
+  db:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: faradyne_postgres
+    environment:
+      - POSTGRES_USER=faradyne
+      - POSTGRES_PASSWORD=faradyne
+      - POSTGRES_DB=faradyne
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faradyne"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - faradyne_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  faradyne_network:
+    driver: bridge

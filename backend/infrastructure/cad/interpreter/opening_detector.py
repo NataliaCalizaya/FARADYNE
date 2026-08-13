@@ -1,0 +1,2 @@
+class OpeningDetector:
+    pass
