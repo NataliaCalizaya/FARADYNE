@@ -1,1 +1,0 @@
-"""Application Tests Package"""

@@ -1,2 +1,0 @@
-class OpeningDetector:
-    pass

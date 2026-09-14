@@ -1,1 +1,0 @@
-"""SPDA Domain Package"""

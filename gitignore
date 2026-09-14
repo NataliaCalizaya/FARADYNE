@@ -1,0 +1,27 @@
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Variables de entorno (credenciales reales - NUNCA subir)
+.env
+
+# Bytecode y cache de Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Archivos subidos por los usuarios (planos DXF/PDF)
+uploads/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
