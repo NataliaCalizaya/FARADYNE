@@ -18,11 +18,24 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await modelos3dApi.createModelo3D(id2d);
+      // Must send an object with id_modelo2d as an integer
+      const payload = { idModelo2D: String(id2d) };
+      //console.log("📦 Enviando payload a FastAPI:", payload);
+
+      const data = await modelos3dApi.generateModelo3D(payload);
       setModelo3dData(data);
     } catch (err) {
+      console.log("🚨 Respuesta de FastAPI (Motivo del 422):", err.response?.data);
+      
       console.error('Error al generar modelo 3D:', err);
-      const msg = err.response?.data?.detail || 'No se pudo generar el modelo 3D volumetricamente.';
+      const detail = err.response?.data?.detail;
+      let msg = 'No se pudo generar el modelo 3D volumetricamente.';
+      
+      if (Array.isArray(detail)) {
+        msg = detail.map(e => `${e.loc[e.loc.length - 1]}: ${e.msg}`).join(' | ');
+      } else if (typeof detail === 'string') {
+        msg = detail;
+      }
       setError(msg);
     } finally {
       setLoading(false);
@@ -30,7 +43,7 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="w-full mx-auto space-y-4">
       <h1 className="text-2xl font-bold font-condensed text-gray-900">
         Generar Modelo 3D
       </h1>

@@ -16,7 +16,8 @@ class Modelo3DResponse(BaseModel):
     id_proyecto: str
     geometria_volumetrica: Dict[str, Any]
     vista_defecto: Dict[str, Any]
-    fecha_creacion: datetime
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None
 
 
 class ResetViewRequest(BaseModel):

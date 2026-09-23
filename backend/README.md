@@ -5,7 +5,7 @@ Sistema de Protección contra Descargas Atmosféricas (SPDA) según normativa **
 ---
 
 ## 🚀 Arquitectura y Tecnologías
-- **Core**: Python 3.11+ / FastAPI
+- **Core**: Python 3.12 / FastAPI
 - **Base de Datos**: PostgreSQL + `psycopg2` (Consultas SQL 100% parametrizadas `%s`, **sin ORM auto-migratorio**)
 - **Validación de Schemas**: `pydantic` v2 / `pydantic-settings`
 - **Cad & Geometría**: `ezdxf` (Lectura y parseo de planos DXF/PDF), `numpy` (Interpolación vectorial de pendientes e inclinación de cubiertas)
