@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, AlertCircle, CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
+import { Box, AlertCircle, CheckCircle2, ArrowRight, Loader2, Info } from 'lucide-react';
 import { Modelo3DViewer } from '../components/Modelo3DViewer/Modelo3DViewer';
 import { modelos3dApi } from '../api/modelos3d';
 
@@ -43,13 +43,18 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
   };
 
   return (
-    <div className="w-full mx-auto space-y-4">
-      <h1 className="text-2xl font-bold font-condensed text-gray-900">
+    <div className="max-w-5xl mx-auto space-y-4">
+      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Generar Modelo 3D
       </h1>
 
+      <div className="workflow-notice p-3 bg-blue-50/95 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
+        <Info className="w-4 h-4 shrink-0" />
+        <div><strong>Paso 3 de 7:</strong> Genere y revise el modelo tridimensional a partir de la geometría validada.</div>
+      </div>
+
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-start gap-2 text-xs">
+        <div className="animate-fade-in p-3 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-start gap-2 text-xs">
           <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
           <div>
             <strong className="font-semibold">Error en extrusión 3D:</strong> {error}
@@ -58,14 +63,14 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
       )}
 
       {loading ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-md h-[400px] flex flex-col items-center justify-center text-white">
+        <div className="header-grid-bg bg-slate-900 border border-slate-800 rounded-md h-[400px] flex flex-col items-center justify-center text-white">
           <Loader2 className="w-8 h-8 text-brand-blue animate-spin mb-3" />
           <p className="text-sm font-semibold">Generando extrusión volumétrica 3D a partir del plano 2D...</p>
           <p className="text-xs text-slate-400 mt-1">Calculando elevaciones y pendientes por capa</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="h-[460px]">
+        <div className="step-transition space-y-4">
+          <div className="card-hover h-[460px] rounded-md overflow-hidden">
             <Modelo3DViewer idModelo3D={modelo3dData?.id || idModelo3D} idModelo2D={idModelo2D} />
           </div>
 
@@ -73,7 +78,7 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
             <button
               type="button"
               onClick={onNext}
-              className="px-5 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center gap-1.5 transition shadow-sm"
+              className="btn-electric px-5 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center gap-1.5 transition shadow-sm"
             >
               Continuar a Nivel de Protección <ArrowRight className="w-4 h-4" />
             </button>

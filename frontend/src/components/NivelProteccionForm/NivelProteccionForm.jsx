@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Calculator, ShieldCheck, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
+import { ShieldCheck, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
 import { nivelesProteccionApi } from '../../api/nivelesProteccion';
+import { SelectField } from '../ui/SelectField';
 
 const PROTECTIONS = [
   { level: 'Nivel I', radius: 'R = 20m', efficiency: '99%', desc: 'Riesgo Crítico / Explosivos' },
@@ -60,7 +61,7 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
   return (
     <div className="space-y-4">
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-start gap-2 text-xs">
+        <div className="animate-fade-in p-3 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-start gap-2 text-xs">
           <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
           <div>
             <strong>Error de Cálculo:</strong> {error}
@@ -69,7 +70,7 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
       )}
 
       {/* Form Card */}
-      <form onSubmit={handleCalculate} className="bg-white border border-gray-200 rounded-md p-4 shadow-sm space-y-4">
+      <form onSubmit={handleCalculate} className="card-hover bg-white border border-gray-200 rounded-md p-4 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-gray-100 pb-2">
           <div className="flex items-center gap-2 text-brand-blue font-bold font-condensed text-base">
             <Zap className="w-5 h-5 text-amber-500 fill-amber-500" />
@@ -86,66 +87,66 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
             <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
               Ubicación / Región
             </label>
-            <select
+            <SelectField
               name="departamento"
               value={formData.departamento}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
-            >
-              <option value="Lima">Lima (Ng = 2.5)</option>
-              <option value="Arequipa">Arequipa (Ng = 3.8)</option>
-              <option value="Cusco">Cusco (Ng = 8.2)</option>
-              <option value="Puno">Puno (Ng = 12.0)</option>
-              <option value="Buenos Aires">Buenos Aires (Ng = 4.5)</option>
-            </select>
+              options={[
+                { value: 'Lima', label: 'Lima (Ng = 2.5)' },
+                { value: 'Arequipa', label: 'Arequipa (Ng = 3.8)' },
+                { value: 'Cusco', label: 'Cusco (Ng = 8.2)' },
+                { value: 'Puno', label: 'Puno (Ng = 12.0)' },
+                { value: 'Buenos Aires', label: 'Buenos Aires (Ng = 4.5)' },
+              ]}
+            />
           </div>
 
           <div>
             <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
               Factor Ubicación (Cd)
             </label>
-            <select
+            <SelectField
               name="factor_ubicacion_cd"
               value={formData.factor_ubicacion_cd}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
-            >
-              <option value="0.5">Rodeado de objetos más altos (Cd=0.5)</option>
-              <option value="1.0">Rodeado de objetos de igual altura (Cd=1.0)</option>
-              <option value="2.0">Estructura aislada en colina/llano (Cd=2.0)</option>
-            </select>
+              options={[
+                { value: '0.5', label: 'Rodeado de objetos más altos (Cd=0.5)' },
+                { value: '1.0', label: 'Rodeado de objetos de igual altura (Cd=1.0)' },
+                { value: '2.0', label: 'Estructura aislada en colina/llano (Cd=2.0)' },
+              ]}
+            />
           </div>
 
           <div>
             <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
               Tipo de Estructura (Cb)
             </label>
-            <select
+            <SelectField
               name="factor_estructura_cb"
               value={formData.factor_estructura_cb}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
-            >
-              <option value="0.5">Hormigón armado / Estructura metálica (Cb=0.5)</option>
-              <option value="1.0">Mampostería / Ladrillo tradicional (Cb=1.0)</option>
-              <option value="2.0">Estructura inflamable / Madera (Cb=2.0)</option>
-            </select>
+              options={[
+                { value: '0.5', label: 'Hormigón armado / Estructura metálica (Cb=0.5)' },
+                { value: '1.0', label: 'Mampostería / Ladrillo tradicional (Cb=1.0)' },
+                { value: '2.0', label: 'Estructura inflamable / Madera (Cb=2.0)' },
+              ]}
+            />
           </div>
 
           <div>
             <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
               Valor de Contenido (Cc)
             </label>
-            <select
+            <SelectField
               name="factor_contenido_cc"
               value={formData.factor_contenido_cc}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
-            >
-              <option value="0.5">Bajo valor sin equipos sensibles (Cc=0.5)</option>
-              <option value="1.0">Estándar residencial / oficinas (Cc=1.0)</option>
-              <option value="3.0">Alto valor o sustancias inflamables (Cc=3.0)</option>
-            </select>
+              options={[
+                { value: '0.5', label: 'Bajo valor sin equipos sensibles (Cc=0.5)' },
+                { value: '1.0', label: 'Estándar residencial / oficinas (Cc=1.0)' },
+                { value: '3.0', label: 'Alto valor o sustancias inflamables (Cc=3.0)' },
+              ]}
+            />
           </div>
         </div>
 
@@ -160,7 +161,7 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
               name="longitud_edificacion"
               value={formData.longitud_edificacion}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
+              className="input-electric w-full p-2 border border-gray-300 rounded text-xs"
             />
           </div>
           <div>
@@ -172,7 +173,7 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
               name="anchura_edificacion"
               value={formData.anchura_edificacion}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
+              className="input-electric w-full p-2 border border-gray-300 rounded text-xs"
             />
           </div>
           <div>
@@ -184,7 +185,7 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
               name="altura_edificacion"
               value={formData.altura_edificacion}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none"
+              className="input-electric w-full p-2 border border-gray-300 rounded text-xs"
             />
           </div>
         </div>
@@ -193,9 +194,8 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
           <button
             type="submit"
             disabled={loading}
-            className="px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center gap-1.5 transition"
+            className="btn-electric px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center gap-1.5 transition disabled:opacity-60"
           >
-            <Calculator className="w-4 h-4" />
             {loading ? 'Calculando Riesgo...' : 'Calcular Nivel de Protección'}
           </button>
         </div>
@@ -204,7 +204,7 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
       {/* Results Section */}
       {result && (
         <div className="space-y-4 animate-fade-in">
-          <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm">
+          <div className="card-hover bg-white border border-gray-200 rounded-md p-4 shadow-sm">
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
               Resultados de la Evaluación de Riesgo (Anexo A)
             </div>
@@ -251,11 +251,10 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
                   <div
                     key={p.level}
                     onClick={() => setSelectedLevel(p.level)}
-                    className={`p-3 rounded-md border-2 text-center cursor-pointer transition ${
-                      isSelected
-                        ? 'bg-brand-blue text-white border-brand-blue shadow-md'
-                        : 'bg-white text-gray-800 border-gray-200 hover:border-brand-blue'
-                    }`}
+                    className={`p-3 rounded-md border-2 text-center cursor-pointer transition-all duration-200 ${isSelected
+                      ? 'bg-brand-blue text-white border-brand-blue shadow-glow-md'
+                      : 'bg-white text-gray-800 border-gray-200 hover:border-brand-blue hover:shadow-glow-sm'
+                      }`}
                   >
                     <div className="text-xs font-bold uppercase tracking-wider">{p.level}</div>
                     <div className="text-2xl font-bold font-condensed my-1">{p.radius}</div>
@@ -269,13 +268,12 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, onNext }) => {
       )}
 
       {/* Navigation next */}
-      <div className="flex justify-end pt-2">
+      <div className="relative -top-1 flex justify-end pr-3">
         <button
           type="button"
           onClick={onNext}
-          className="px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-semibold rounded text-xs transition"
-        >
-          Siguiente: Posicionar Mástiles →
+          className="btn-electric px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-semibold rounded text-xs transition"
+        > Siguiente: Posicionar Mástiles →
         </button>
       </div>
     </div>

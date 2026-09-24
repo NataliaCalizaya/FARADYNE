@@ -302,15 +302,14 @@ export const UbicacionMastiles = ({
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto space-y-4">
-
+    <div className="max-w-6xl mx-auto space-y-4">
       {/* ── Título ── */}
-      <h1 className="text-2xl font-bold font-condensed text-gray-900">
+      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900" >
         Ubicación de Mástiles Captores
       </h1>
 
       {/* ── Descripción del paso ── */}
-      <div className="p-3 bg-blue-50 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
+      <div className="workflow-notice p-3 bg-blue-50/95 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
         <Info className="w-4 h-4 shrink-0" />
         <div>
           <strong>Paso 5 (HU05):</strong> Haga clic sobre el visor 2D para colocar mástiles

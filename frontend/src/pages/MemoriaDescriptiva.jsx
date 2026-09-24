@@ -5,11 +5,11 @@ import { CheckCircle2, Download, CloudUpload, FileText } from 'lucide-react';
 export const MemoriaDescriptiva = ({ projectData }) => {
   return (
     <div className="max-w-5xl mx-auto space-y-4">
-      <h1 className="text-2xl font-bold font-condensed text-gray-900">
+      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Memoria Descriptiva & Documento Final
       </h1>
 
-      <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md flex items-center gap-2 text-xs">
+      <div className="workflow-notice p-3 bg-emerald-50/95 border border-emerald-200 text-emerald-800 rounded-md flex items-center gap-2 text-xs">
         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
         <div>
           <strong>Paso 7 de 7 (FINAL):</strong> Vista previa de la Memoria Descriptiva según Ley 19.587 / Decreto 351/79 e IRAM 2184.
@@ -17,20 +17,19 @@ export const MemoriaDescriptiva = ({ projectData }) => {
       </div>
 
       {/* Professional PDF Preview Box */}
-      <div className="bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
+      <div className="card-hover bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
         {/* Document Header */}
-        <div className="bg-gradient-to-r from-slate-900 to-brand-blue p-5 text-white flex justify-between items-center">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-blue-200 font-semibold">
-              Memoria Descriptiva
-            </div>
-            <div className="text-lg font-bold font-condensed">
-              Sistema de Protección contra Rayos (SPDA)
-            </div>
-            <div className="text-xs text-blue-100 mt-0.5">
-              Decreto 351/79 · Ley 19.587 · IRAM 2184
-            </div>
+        <div className="bg-gradient-to-r from-slate-900 to-brand-blue p-5 text-white flex justify-between items-center">          <div>
+          <div className="text-[10px] uppercase tracking-widest text-blue-200 font-semibold">
+            Memoria Descriptiva
           </div>
+          <div className="text-lg font-bold font-condensed">
+            Sistema de Protección contra Rayos (SPDA)
+          </div>
+          <div className="text-xs text-blue-100 mt-0.5">
+            Decreto 351/79 · Ley 19.587 · IRAM 2184
+          </div>
+        </div>
           <div className="bg-white/10 backdrop-blur px-3 py-1.5 rounded text-right border border-white/20">
             <div className="text-[9px] text-blue-200 uppercase">N° Expediente</div>
             <div className="text-sm font-bold font-mono">FAR-2026-0042</div>
@@ -70,15 +69,15 @@ export const MemoriaDescriptiva = ({ projectData }) => {
               3. Parámetros de Diseño Alcanzados
             </h3>
             <div className="grid grid-cols-3 gap-3">
-              <div className="p-3 bg-blue-50 border-l-4 border-brand-blue rounded">
+              <div className="card-hover p-3 bg-blue-50 border-l-4 border-brand-blue rounded">
                 <div className="text-[10px] text-brand-blue font-bold uppercase">Nivel de Protección</div>
                 <div className="text-lg font-bold font-condensed text-slate-900">NP II (R=30m)</div>
               </div>
-              <div className="p-3 bg-blue-50 border-l-4 border-brand-blue rounded">
+              <div className="card-hover p-3 bg-blue-50 border-l-4 border-brand-blue rounded">
                 <div className="text-[10px] text-brand-blue font-bold uppercase">Cobertura Lograda</div>
                 <div className="text-lg font-bold font-condensed text-slate-900">98% Cubierto</div>
               </div>
-              <div className="p-3 bg-emerald-50 border-l-4 border-emerald-500 rounded">
+              <div className="card-hover p-3 bg-emerald-50 border-l-4 border-emerald-500 rounded">
                 <div className="text-[10px] text-emerald-700 font-bold uppercase">Cumplimiento Legal</div>
                 <div className="text-lg font-bold font-condensed text-emerald-800">CONFORME</div>
               </div>
@@ -102,7 +101,7 @@ export const MemoriaDescriptiva = ({ projectData }) => {
         <button
           type="button"
           onClick={() => alert('Generando informe completo en PDF...')}
-          className="flex-1 py-2.5 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center justify-center gap-2 transition"
+          className="btn-electric flex-1 py-2.5 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center justify-center gap-2 transition"
         >
           <Download className="w-4 h-4" /> Descargar Memoria Descriptiva (PDF)
         </button>
