@@ -1,14 +1,19 @@
+from pathlib import Path
 import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     # Database Settings
-    DB_HOST: str = "localhost"
+    DB_HOST: str
     DB_PORT: int = 5432
-    DB_NAME: str = "faradyne"
-    DB_USER: str = "postgres"
-    DB_PASSWORD: str = "postgres"
+    DB_NAME: str
+    DB_USER: str
+    DB_PASSWORD: str
     DB_MIN_CONN: int = 1
     DB_MAX_CONN: int = 10
 
@@ -19,9 +24,9 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
 
 
