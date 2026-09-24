@@ -23,7 +23,7 @@ Sistema de Diseño y Cálculo de Instalaciones de Protección contra Descargas A
 
 Crear/verificar el archivo `.env` en la raíz de `frontend/`:
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:8000/api/v1
+VITE_API_BASE_URL=http://127.0.0.1:6500/api/v1
 ```
 
 ## Ejecución en Desarrollo
@@ -33,7 +33,7 @@ Levantar el servidor de desarrollo Vite:
 npm run dev
 ```
 
-La aplicación se abrirá en `http://localhost:3000`.
+La aplicación se abrirá en `http://localhost:1232`.
 
 ## Compilación para Producción
 

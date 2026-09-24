@@ -6,33 +6,810 @@
   body {
     font-family: 'Barlow', sans-serif;
     color: #1a1a1a;
+    min-height: 100vh;
+    background-color: #f1f5f9;
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-attachment: fixed;
+    overflow-x: hidden;
   }
-  h1, h2, h3, .font-condensed {
+
+  #root {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+  }
+
+  /* Luz ambiental superior */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -8rem;
+    left: -8rem;
+    width: 36rem;
+    height: 36rem;
+    background: radial-gradient(circle, rgba(26, 109, 186, 0.35) 0%, rgba(26, 109, 186, 0) 70%);
+    border-radius: 50%;
+    filter: blur(50px);
+    pointer-events: none;
+    z-index: 0;
+    /* Se envía al fondo de toda la aplicación */
+    animation: pulseObstaculo 5s ease-in-out infinite;
+  }
+
+  /* Luz ambiental inferior */
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -8rem;
+    right: -8rem;
+    width: 38rem;
+    height: 38rem;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.4) 0%, rgba(56, 189, 248, 0) 70%);
+    border-radius: 50%;
+    filter: blur(50px);
+    pointer-events: none;
+    z-index: 0;
+    /* Se envía al fondo de toda la aplicación */
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-condensed {
     font-family: 'Barlow Condensed', sans-serif;
   }
 }
 
 @keyframes pulseObstaculo {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.85; }
+
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 0.85;
+  }
 }
 
 .animate-pulse-obstaculo {
   animation: pulseObstaculo 1.6s ease-in-out infinite;
 }
 
+/* Datos del proyecto: acentos eléctricos sin alterar los controles del formulario */
+.workflow-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.workflow-title::before {
+  content: '';
+  width: 0.28rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  background: #1a6dba;
+  box-shadow: 0 0 12px rgba(26, 109, 186, 0.7);
+  animation: projectTitlePulse 2.4s ease-in-out infinite;
+}
+
+.workflow-notice {
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 25px -16px rgba(26, 109, 186, 0.32);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.workflow-notice:hover {
+  transform: translateX(3px);
+  box-shadow: 0 10px 28px -14px rgba(26, 109, 186, 0.45);
+}
+
+.project-data-card {
+  position: relative;
+  overflow: visible;
+  backdrop-filter: blur(6px);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.project-data-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #38bdf8, #1a6dba, transparent);
+  background-size: 200% 100%;
+  animation: projectElectricFlow 3.5s linear infinite;
+}
+
+.project-data-card:focus-within {
+  border-color: rgba(26, 109, 186, 0.45);
+  box-shadow: 0 10px 30px -18px rgba(26, 109, 186, 0.45);
+}
+
+.project-field {
+  position: relative;
+  transition: transform 0.2s ease;
+}
+
+.project-field:focus-within {
+  z-index: 50;
+  transform: translateY(-1px);
+}
+
+.project-field label {
+  transition: color 0.2s ease;
+}
+
+.project-field:focus-within label {
+  color: #1a6dba;
+}
+
+/* Fondo del flujo de proyecto: deja visibles las luces ambientales sin competir con el contenido */
+.app-workspace {
+  background-color: #eaf2f8;
+  background-image:
+    radial-gradient(ellipse 38rem 34rem at -8% 48%, rgba(56, 189, 248, 0.42) 0%, rgba(125, 211, 252, 0.22) 38%, transparent 72%),
+    linear-gradient(rgba(241, 245, 249, 0.56), rgba(241, 245, 249, 0.72)),
+    url('/fondoFaradyne.jpg');
+  background-position: left center, center, center -2rem;
+  background-size: auto, auto, cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* El header y el selector de pasos conservan prioridad visual sobre el fondo. */
+.app-workspace>* {
+  position: relative;
+}
+
+.app-workspace main {
+  position: relative;
+}
+
+.app-workspace main::before,
+.app-workspace main::after {
+  content: none;
+}
+
+@keyframes projectTitlePulse {
+
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scaleY(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes projectElectricFlow {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+
 /* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
+
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 3px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* ============================================
+   Step content transition (slide + fade)
+   ============================================ */
+@keyframes stepSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.step-transition {
+  animation: stepSlideIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ============================================
+   Header grid background (sutil, técnico)
+   ============================================ */
+.header-grid-bg {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* ============================================
+   Hero grid background (pantalla de login, inmersiva)
+   ============================================ */
+.hero-grid-bg {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+/* Luces de ambiente del inicio de sesión: movimiento lento, sin distraer. */
+.login-ambient-glow {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(48px);
+  pointer-events: none;
+}
+
+.login-ambient-glow-one {
+  width: 18rem;
+  height: 18rem;
+  top: 12%;
+  left: -7rem;
+  background: rgba(56, 189, 248, 0.18);
+  animation: loginAmbientDrift 8s ease-in-out infinite;
+}
+
+.login-ambient-glow-two {
+  width: 14rem;
+  height: 14rem;
+  right: 8%;
+  bottom: 10%;
+  background: rgba(26, 109, 186, 0.2);
+  animation: loginAmbientDrift 10s ease-in-out -4s infinite reverse;
+}
+
+.login-headline {
+  font-family: 'Barlow', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  animation: loginTextEnter 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.login-copy {
+  font-family: 'Barlow', sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  animation: loginTextEnter 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both;
+}
+
+.login-message {
+  animation: loginMessageSway 8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.login-diagram {
+  transform-origin: 55% 70%;
+  animation: loginDiagramFloat 7.5s ease-in-out infinite;
+}
+
+@keyframes loginAmbientDrift {
+
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: translate3d(0, 0, 0) scale(0.92);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: translate3d(1.5rem, -1rem, 0) scale(1.08);
+  }
+}
+
+@keyframes loginTextEnter {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes loginDiagramFloat {
+
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0.35rem, 0, 0);
+  }
+}
+
+@keyframes loginTextFloat {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: translate3d(0.25rem, -0.35rem, 0);
+  }
+}
+
+@keyframes loginMessageSway {
+
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0.25rem, -0.2rem, 0);
+  }
+}
+
+/* Rayo del hero: se dibuja una vez al cargar y luego late suavemente */
+@keyframes boltDrawIcon {
+  0% {
+    stroke-dashoffset: 66;
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 1;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes boltGlowPulse {
+
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0px rgba(61, 148, 224, 0.5));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 7px rgba(61, 148, 224, 0.85));
+  }
+}
+
+.bolt-draw-icon {
+  stroke-dasharray: 66;
+  stroke-dashoffset: 66;
+  animation:
+    boltDrawIcon 1s cubic-bezier(0.22, 1, 0.36, 1) 0.3s forwards,
+    boltGlowPulse 2.6s ease-in-out 1.4s infinite;
+}
+
+/* Puesta a tierra del hero: pulso que recorre el conductor en loop */
+@keyframes groundFlow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+
+.ground-flow {
+  stroke-dasharray: 5 9;
+  animation: groundFlow 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .bolt-draw-icon,
+  .ground-flow,
+  .workflow-title::before,
+  .project-data-card::before,
+  .login-ambient-glow {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+/* Pulso eléctrico del ícono del header */
+@keyframes iconPulse {
+
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0px rgba(26, 109, 186, 0.6));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 6px rgba(26, 109, 186, 0.9));
+  }
+}
+
+.icon-pulse {
+  animation: iconPulse 2.2s ease-in-out infinite;
+}
+
+/* ============================================
+   Cards con hover luminoso
+   ============================================ */
+.card-hover {
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+}
+
+.card-hover:hover {
+  border-color: rgba(26, 109, 186, 0.45);
+  box-shadow: 0 4px 20px -4px rgba(26, 109, 186, 0.25);
+  transform: translateY(-2px);
+}
+
+/* Inputs con focus ring eléctrico */
+.input-electric {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input-electric:focus {
+  border-color: #1a6dba;
+  box-shadow: 0 0 0 3px rgba(26, 109, 186, 0.15);
+  outline: none;
+}
+
+/* Se usa un único control para revelar la contraseña. */
+.password-input::-ms-reveal,
+.password-input::-ms-clear {
+  display: none;
+}
+
+/* Modo nocturno para todo el flujo de trabajo. */
+.dark-mode {
+  min-height: 100dvh;
+  color: #e2e8f0;
+  background-color: #0f172a;
+  background-image:
+    radial-gradient(ellipse 38rem 30rem at 0% 35%, rgba(14, 116, 144, 0.18), transparent 68%),
+    radial-gradient(ellipse 32rem 30rem at 100% 85%, rgba(30, 64, 175, 0.18), transparent 70%),
+    linear-gradient(rgba(15, 23, 42, 0.92), rgba(8, 15, 30, 0.97)),
+    url('/fondoFaradyne.jpg');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+body:has(.dark-mode) {
+  background-color: #0f172a;
+  background-image: none;
+}
+
+.dark-mode .bg-white,
+.dark-mode .bg-white\/90,
+.dark-mode .bg-white\/80,
+.dark-mode .bg-slate-100,
+.dark-mode .bg-slate-50,
+.dark-mode .bg-gray-50 {
+  background-color: #172033 !important;
+  box-shadow: 0 12px 28px -22px rgba(0, 0, 0, 0.9);
+}
+
+.dark-mode .bg-gray-100 {
+  background-color: #1e293b !important;
+}
+
+.dark-mode .bg-gray-200 {
+  background-color: #334155 !important;
+}
+
+.dark-mode .hover\:bg-gray-300:hover {
+  background-color: #475569 !important;
+}
+
+.dark-mode .border-gray-100,
+.dark-mode .border-gray-200,
+.dark-mode .border-gray-300 {
+  border-color: #334155 !important;
+}
+
+.dark-mode .text-gray-900,
+.dark-mode .text-gray-800,
+.dark-mode .text-gray-700,
+.dark-mode .text-gray-600,
+.dark-mode .text-gray-500 {
+  color: #cbd5e1 !important;
+}
+
+.dark-mode .text-gray-400 {
+  color: #94a3b8 !important;
+}
+
+.dark-mode .text-slate-900,
+.dark-mode .text-slate-800,
+.dark-mode .text-slate-700,
+.dark-mode .text-slate-600 {
+  color: #e2e8f0 !important;
+}
+
+.dark-mode .text-brand-blue {
+  color: #7dd3fc !important;
+}
+
+.dark-mode .hover\:bg-gray-50:hover,
+.dark-mode .hover\:bg-slate-50:hover {
+  background-color: #223047 !important;
+}
+
+.dark-mode table thead {
+  background-color: #24334b !important;
+}
+
+.dark-mode table tbody tr:hover {
+  background-color: #1d2a3d !important;
+}
+
+.dark-mode .bg-blue-50,
+.dark-mode .bg-blue-50\/95 {
+  color: #bfdbfe;
+  background-color: rgba(30, 58, 95, 0.78) !important;
+}
+
+.dark-mode .border-blue-200 {
+  border-color: #285581 !important;
+}
+
+.dark-mode .bg-emerald-50 {
+  background-color: rgba(6, 78, 59, 0.65) !important;
+}
+
+.dark-mode .bg-red-50 {
+  background-color: rgba(127, 29, 29, 0.46) !important;
+}
+
+.dark-mode input,
+.dark-mode textarea,
+.dark-mode .custom-select-trigger,
+.dark-mode .custom-select-menu,
+.dark-mode .custom-select-option {
+  color: #e2e8f0;
+  background-color: #0f172a;
+  border-color: #475569;
+}
+
+.dark-mode .custom-select-option:hover,
+.dark-mode .custom-select-option:focus-visible,
+.dark-mode .custom-select-option.is-selected {
+  color: #e0f2fe;
+  background-color: #1e3a5f;
+}
+
+.dark-mode .input-electric:focus,
+.dark-mode .custom-select-trigger:hover,
+.dark-mode .custom-select-trigger:focus-visible {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
+}
+
+.theme-toggle {
+  /* Alineado al borde derecho del contenedor max-w-5xl de Datos del Proyecto. */
+  position: fixed !important;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 80;
+  color: #e0f2fe;
+  background: linear-gradient(135deg, #0f3d6d, #1a6dba);
+  border: 1px solid rgba(125, 211, 252, 0.55);
+  box-shadow: 0 12px 28px -10px rgba(15, 61, 109, 0.6);
+}
+
+@media (min-width: 68rem) {
+  .theme-toggle {
+    right: calc(50vw - 40.75rem);
+  }
+}
+
+.theme-toggle:hover {
+  color: #fff;
+  background: linear-gradient(135deg, #07559b, #38bdf8);
+  box-shadow: 0 16px 34px -10px rgba(14, 165, 233, 0.48);
+  transform: translateY(-2px);
+}
+
+.theme-toggle:focus-visible {
+  outline: 3px solid rgba(125, 211, 252, 0.75);
+  outline-offset: 3px;
+}
+
+.dark-mode .theme-toggle {
+  color: #1e3a5f;
+  background: linear-gradient(135deg, #ffffff, #eaf4ff);
+  border-color: rgba(125, 211, 252, 0.8);
+  box-shadow: 0 14px 30px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+}
+
+.dark-mode .theme-toggle:hover {
+  color: #07559b;
+  background: linear-gradient(135deg, #ffffff, #d7eeff);
+  box-shadow: 0 16px 35px -10px rgba(0, 0, 0, 0.9), 0 0 18px rgba(125, 211, 252, 0.28);
+}
+
+/* ============================================
+   Botón con efecto de "carga eléctrica" en hover
+   ============================================ */
+.btn-electric {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-electric::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -150%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(120deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.35) 50%,
+      transparent 100%);
+  transform: skewX(-20deg);
+  transition: left 0.55s ease;
+  pointer-events: none;
+}
+
+.btn-electric:hover::after {
+  left: 150%;
+}
+
+/* ============================================
+   Stepper: línea de progreso animada
+   ============================================ */
+.stepper-progress-fill {
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes progressGlow {
+
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(26, 109, 186, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 10px rgba(26, 109, 186, 0.8);
+  }
+}
+
+.stepper-active-glow {
+  animation: progressGlow 1.8s ease-in-out infinite;
+}
+
+/* Tooltip del stepper */
+.stepper-tooltip {
+  opacity: 0;
+  transform: translateY(4px) translateX(-50%);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.group:hover .stepper-tooltip {
+  opacity: 1;
+  transform: translateY(0) translateX(-50%);
+}
+
+/* Utilidad para ocultar scrollbar (stepper horizontal en mobile) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Selectores: estado activo con tono eléctrico, no gris neutro. */
+select.input-electric {
+  background-color: #fff;
+  border-color: #d1d5db;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+select.input-electric:hover {
+  border-color: rgba(26, 109, 186, 0.65);
+  box-shadow: 0 0 0 3px rgba(26, 109, 186, 0.08);
+}
+
+select.input-electric option {
+  background-color: #fff;
+  color: #1f2937;
+}
+
+select.input-electric option:checked,
+select.input-electric option:hover {
+  background-color: #dbeafe;
+  color: #0f3d6d;
+}
+
+/* Menú propio: evita el resaltado gris que impone el selector nativo del navegador. */
+.custom-select {
+  position: relative;
+  width: 100%;
+  font-size: 0.75rem;
+}
+
+.custom-select-trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  color: #1f2937;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.25rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.custom-select-trigger:hover,
+.custom-select-trigger:focus-visible {
+  border-color: #1a6dba;
+  box-shadow: 0 0 0 3px rgba(26, 109, 186, 0.13);
+  outline: none;
+}
+
+.custom-select-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  width: 100%;
+  padding: 0.25rem;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.375rem;
+  box-shadow: 0 10px 24px -10px rgba(15, 61, 109, 0.35);
+}
+
+.custom-select-option {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  color: #1f2937;
+  text-align: left;
+  background: #fff;
+  border-radius: 0.25rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.custom-select-option:hover,
+.custom-select-option:focus-visible {
+  color: #0f3d6d;
+  background: #dbeafe;
+  outline: none;
+}
+
+.custom-select-option.is-selected {
+  color: #07559b;
+  font-weight: 600;
+  background: #eff6ff;
 }

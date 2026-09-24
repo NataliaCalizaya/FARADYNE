@@ -13,18 +13,18 @@ export const ListadoMateriales = ({ onNext }) => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
-      <h1 className="text-2xl font-bold font-condensed text-gray-900">
+      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Listado de Materiales
       </h1>
 
-      <div className="p-3 bg-blue-50 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
+      <div className="workflow-notice p-3 bg-blue-50/95 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
         <Info className="w-4 h-4 shrink-0" />
         <div>
           <strong>Paso 6 de 7:</strong> Listado de materiales computados automáticamente según el diseño de pararrayos optimizado.
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm space-y-3">
+      <div className="card-hover bg-white border border-gray-200 rounded-md p-4 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-gray-700 uppercase">
             Cómputo Métrico de Materiales
@@ -50,7 +50,10 @@ export const ListadoMateriales = ({ onNext }) => {
             </thead>
             <tbody>
               {materials.map((m, idx) => (
-                <tr key={idx} className="border-b border-gray-100 hover:bg-slate-50">
+                <tr
+                  key={idx}
+                  className="border-b border-gray-100 hover:bg-slate-50 transition-colors"
+                >
                   <td className="p-2 font-mono text-gray-600">{m.code}</td>
                   <td className="p-2 text-gray-800">{m.desc}</td>
                   <td className="p-2 text-center font-semibold text-brand-blue">{m.qty}</td>
@@ -63,7 +66,7 @@ export const ListadoMateriales = ({ onNext }) => {
         <div className="flex justify-between items-center pt-2">
           <button
             type="button"
-            className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold rounded text-xs flex items-center gap-1.5 transition"
+            className="btn-electric px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold rounded text-xs flex items-center gap-1.5 transition"
             onClick={() => alert('Descargando listado de materiales...')}
           >
             <Download className="w-4 h-4 text-brand-blue" /> Descargar Listado (CSV)
@@ -72,7 +75,7 @@ export const ListadoMateriales = ({ onNext }) => {
           <button
             type="button"
             onClick={onNext}
-            className="px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs transition"
+            className="btn-electric px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs transition"
           >
             Siguiente: Memoria Descriptiva →
           </button>
