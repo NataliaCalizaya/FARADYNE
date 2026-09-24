@@ -1,4 +1,8 @@
 
+# Dependencias de Node
+node_modules/
+frontend/node_modules/
+
 # Entornos virtuales
 venv/
 env/
@@ -15,6 +19,8 @@ __pycache__/
 
 # Archivos subidos por los usuarios (planos DXF/PDF)
 backend/uploads/
+frontend/dist/
+backend/.venv/
 
 # Editor / IDE
 .vscode/
@@ -26,15 +32,3 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Dependencias de Node
-node_modules/
-
-# Cache de Vite
-.vite/
-
-# Build de producción de Vite
-frontend/dist/
-
-# Archivos generados de npm
-npm-debug.log*
