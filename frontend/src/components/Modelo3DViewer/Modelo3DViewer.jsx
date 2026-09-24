@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three-stdlib';
 import { RefreshCw, Box, Eye, Loader2 } from 'lucide-react';
 import { modelos3dApi } from '../../api/modelos3d';
-
+import { getMastColor } from '../../api/utilsMastilVisual'
 /**
  * FARADYNE Model Convention:
  * El Backend Python envía: [x, y, z] donde Z es la altura.
@@ -79,7 +79,7 @@ function addLabelToScene(scene, x, y, z, text) {
   );
 
   sprite.scale.set(2.4, 0.72, 1);
-  sprite.position.set(x, z + 0.25, y);
+  sprite.position.set(x, z + 0.25, -y);
   scene.add(sprite);
 }
 
@@ -159,7 +159,7 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
         color: 0xe07a10, transparent: true, opacity: 0.85, roughness: 0.4,
       });
       const mesh = new THREE.Mesh(g, m);
-      mesh.position.set(t.x, (t.base + t.top) / 2, t.y);
+      mesh.position.set(t.x, (t.base + t.top) / 2, -t.y);
       scene.add(mesh);
     }
 
@@ -198,27 +198,32 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
 
     // Mástiles
     masts.forEach((mast) => {
-      const mx = mast.posicion_x || 0;
-      const my = mast.posicion_y || 0;
-      const mz = mast.posicion_z || 4; // Altura base
-      const alt = mast.altura || 3;
+    const mx = mast.posicion_x || 0;
+    const my = mast.posicion_y || 0;
+    const mz = mast.posicion_z || 0;
+    const alturaTotal = mast.altura || 1;
+    const alturaCono = Math.min(0.3, alturaTotal * 0.25);
+    const alturaCilindro = alturaTotal - alturaCono;
+    const color = getMastColor(alturaTotal);
 
-      const group = new THREE.Group();
-      group.position.set(mx, mz, my);
+    const group = new THREE.Group();
+    group.position.set(mx, mz, -my);
 
-      const poleGeo = new THREE.CylinderGeometry(0.15, 0.25, alt, 16);
-      const poleMat = new THREE.MeshStandardMaterial({ color: 0xe07a10, metalness: 0.8, roughness: 0.2 });
-      const poleMesh = new THREE.Mesh(poleGeo, poleMat);
-      poleMesh.position.set(0, alt / 2, 0);
-      group.add(poleMesh);
+    const poleMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.12, alturaCilindro, 16),
+      new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness: 0.2 })
+    );
+    poleMesh.position.set(0, alturaCilindro / 2, 0);
+    group.add(poleMesh);
 
-      const tipGeo = new THREE.ConeGeometry(0.3, 1, 16);
-      const tipMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.5 });
-      const tipMesh = new THREE.Mesh(tipGeo, tipMat);
-      tipMesh.position.set(0, alt + 0.5, 0);
-      group.add(tipMesh);
+    const tipMesh = new THREE.Mesh(
+      new THREE.ConeGeometry(0.14, alturaCono, 16),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35 })
+    );
+    tipMesh.position.set(0, alturaCilindro + alturaCono / 2, 0);
+    group.add(tipMesh);
 
-      scene.add(group);
+    scene.add(group);
     });
 
     const controls = new OrbitControls(camera, renderer.domElement);

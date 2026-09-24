@@ -76,6 +76,37 @@ def create_modelo3d(payload: Modelo3DCreateRequest) -> Dict[str, Any]:
     }
 
 
+@router.get("/by-modelo2d/{id_modelo2d}", response_model=Modelo3DResponse)
+def get_modelo3d_by_modelo2d(id_modelo2d: str) -> Dict[str, Any]:
+    """Obtiene el Modelo 3D asociado a un Modelo 2D (si existe)."""
+    modelo3d = Modelo3DRepository.get_modelo3d_by_modelo2d_id(id_modelo2d)
+    if not modelo3d:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No se encontró un Modelo 3D para el Modelo 2D '{id_modelo2d}'.",
+        )
+
+    id_3d = str(modelo3d.get("id_modelo3d", modelo3d.get("id", "")))
+    id_2d = str(modelo3d.get("id_modelo2d", id_modelo2d))
+
+    id_proyecto = ""
+    if id_2d:
+        modelo2d = PlanoRepository.get_modelo2d_by_id(id_2d)
+        if modelo2d and modelo2d.get("id_plano"):
+            plano_db = PlanoRepository.get_plano_by_id(modelo2d["id_plano"])
+            id_proyecto = str(plano_db.get("id_proyecto", "")) if plano_db else ""
+
+    return {
+        "id": id_3d,
+        "id_modelo2d": id_2d,
+        "id_proyecto": id_proyecto,
+        "geometria_volumetrica": modelo3d.get("geometria_volumetrica", {}),
+        "vista_defecto": modelo3d.get("vista_defecto", {"camera": [50, 50, 50], "target": [0, 0, 0]}),
+        "creado_en": modelo3d.get("creado_en"),
+        "actualizado_en": modelo3d.get("actualizado_en"),
+    }
+
+
 @router.get("/{id}", response_model=Modelo3DResponse)
 def get_modelo3d(id: str) -> Dict[str, Any]:
     """HU03: Retrieve generated 3D geometry for model viewer."""

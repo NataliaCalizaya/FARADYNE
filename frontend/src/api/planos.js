@@ -51,8 +51,10 @@ export const planosApi = {
    * líneas de fondo. Se pide después de cada operación de edición.
    * @param {string} idModelo2D
    */
-  getModelo2DEdicion: async (idModelo2D) => {
-    const response = await apiClient.get(`/modelos2d/${idModelo2D}/edicion`);
+  getModelo2DEdicion: async (idModelo2D, { incluirLineas = false } = {}) => {
+    const response = await apiClient.get(`/modelos2d/${idModelo2D}/edicion`, {
+      params: incluirLineas ? { incluir_lineas: true } : undefined,
+    });
     return response.data;
   },
 

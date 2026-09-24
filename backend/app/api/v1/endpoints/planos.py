@@ -279,25 +279,22 @@ def get_modelo2d(id: str) -> Dict[str, Any]:
 
 
 @modelos2d_router.get("/{id}/edicion")
-def get_modelo2d_edicion(id: str) -> Dict[str, Any]:
-    """
-    Estado editable del Modelo 2D (sin las líneas de fondo, que son pesadas).
-    El visor lo pide después de cada operación para mostrar siempre lo que
-    quedó guardado en el servidor.
-    """
+def get_modelo2d_edicion(id: str, incluir_lineas: bool = False) -> Dict[str, Any]:
     try:
         modelo = EditorModelo2DService.obtener_modelo2d(id)
-
     except ValueError as err:
         raise _http_error(err)
 
-    return {
+    resultado = {
         "id_modelo2d": id,
         "validado": bool(modelo.get("validado", False)),
         "capas": modelo.get("capas") or [],
         "poligonos": modelo.get("poligonos") or [],
         "cotas_altura": modelo.get("cotas_altura") or [],
     }
+    if incluir_lineas:
+        resultado["lineas"] = modelo.get("lineas") or []
+    return resultado
 
 
 # ============================================================

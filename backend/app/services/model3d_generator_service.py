@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Tuple, Callable, Optional
 
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, Point
 
 
 # ============================================================
@@ -1040,87 +1040,74 @@ class Model3DGeneratorService:
         # TANQUE
         # ====================================================
 
-        tank = None
+        # tank = None
 
-        try:
+        # try:
 
-            high_marks = []
+        #     high_marks = []
 
-            for mark in all_level_marks:
+        #     for mark in all_level_marks:
 
-                if not isinstance(
-                    mark,
-                    dict
-                ):
-                    continue
+        #         if not isinstance(
+        #             mark,
+        #             dict
+        #         ):
+        #             continue
 
-                value = get_level_value(
-                    mark
-                )
+        #         value = get_level_value(
+        #             mark
+        #         )
 
-                if value is None:
-                    continue
+        #         if value is None:
+        #             continue
 
-                if (
-                    abs(
-                        value
-                        - float(
-                            tank_threshold
-                        )
-                    )
-                    < 0.05
-                ):
+        #         if (
+        #             abs(value- float(tank_threshold  )
+        #             )
+        #             < 0.05
+        #         ):
 
-                    high_marks.append(
-                        mark
-                    )
+        #             high_marks.append(
+        #                 mark
+        #             )
 
-            if high_marks:
+        #     if high_marks:
 
-                p = high_marks[0]
+        #         p = high_marks[0]
 
-                tx, ty = get_level_position(
-                    p
-                )
+        #         tx, ty = get_level_position(
+        #             p
+        #         )
 
-                tw = max(
-                    2.0,
-                    (
-                        bx1 - bx0
-                    ) * 0.06,
-                )
+        #         tw = max(       2.0,(    bx1 - bx0) * 0.06,
+        #         )
 
-                td = max(
-                    1.5,
-                    (
-                        by1 - by0
-                    ) * 0.06,
-                )
+        #         td = max( 1.5, (by1 - by0) * 0.06,
+        #         )
 
-                z0 = 7.9
+        #         z0 = 7.9
 
-                z1 = float(
-                    tank_threshold
-                )
+        #         z1 = float(tank_threshold
+        #         )
 
-                tank = {
-                    "x": tx,
-                    "y": ty,
-                    "width": tw,
-                    "depth": td,
-                    "base": z0,
-                    "top": z1,
-                }
+        #         tank = {
+        #             "x": tx,
+        #             "y": ty,
+        #             "width": tw,
+        #             "depth": td,
+        #             "base": z0,
+        #             "top": z1,
+        #         }
 
-        except Exception as exc:
+        # except Exception as exc:
 
-            print(
-                "[MODELO 3D] "
-                f"No se pudo detectar tanque: "
-                f"{exc}"
-            )
+        #     print(
+        #         "[MODELO 3D] "
+        #         f"No se pudo detectar tanque: "
+        #         f"{exc}"
+        #     )
 
-            tank = None
+        #     tank = None
 
         # ====================================================
         # NIVELES GENERALES
@@ -1168,7 +1155,7 @@ class Model3DGeneratorService:
 
             "prisms": prisms,
 
-            "tank": tank,
+            #"tank": tank,
 
             "region_count": len(
                 regions_3d
@@ -1225,3 +1212,41 @@ class Model3DGeneratorService:
         )
 
         return metadata
+
+
+
+def get_altura_en_punto(
+        poligonos: List[Dict[str, Any]],
+        x: float,
+        y: float,
+        default: float = 0.0,
+        ) -> float:
+            """
+            Dado un punto (x, y) del Modelo2D, busca en qué polígono cae y devuelve
+            la altura (Z) de la cubierta en ese punto exacto, usando el mismo
+            cálculo de plano (top_plane) que usa el generador de Modelo 3D.
+
+            Si el punto no cae dentro de ningún polígono, devuelve `default`
+            (0.0 = nivel de piso; es un caso válido, ej. mástil perimetral en el
+            suelo, no un error).
+            """
+            punto = Point(x, y)
+
+            for region in poligonos:
+                try:
+                    footprint = normalize_footprint(region)
+                    if len(footprint) < 3:
+                        continue
+
+                    poly = Polygon(footprint)
+                    if not poly.is_valid or not (poly.contains(punto) or poly.touches(punto)):
+                        continue
+
+                    prepared = prepare_region_levels(region)
+                    z_function, _, _ = top_plane(prepared)
+                    return round(float(z_function(x, y)), 3)
+
+                except (ValueError, TypeError):
+                    continue
+
+            return default

@@ -240,7 +240,7 @@ export const GeometriaViewer = ({
 
   const [boundingBox, setBoundingBox] = useState(null);
   const [isValidated, setIsValidated] = useState(false);
-
+  //const [tank, setTank] = useState(null);
 
   // ========================================================
   // VISTA
@@ -354,6 +354,7 @@ export const GeometriaViewer = ({
       setCapas(data.capas || []);
       setCotasAltura(data.cotas_altura || []);
       setBoundingBox(data.bounding_box || null);
+      // setTank(data.tank || null);
       setIsValidated(!!data.validado);
 
     } catch (err) {
@@ -1715,6 +1716,42 @@ export const GeometriaViewer = ({
                     />
                   );
                 })}
+                {/* =============================================
+                    TANQUE
+                ============================================= */}
+
+                {/* {tank && (
+                  (() => {
+                    const tx = Number(tank.x ?? 0);
+                    const ty = Number(tank.y ?? 0);
+                    const width = Number(tank.width ?? 0);
+                    const depth = Number(tank.depth ?? 0);
+
+                    const x1 = tx - width / 2;
+                    const y1 = ty - depth / 2;
+                    const x2 = tx + width / 2;
+                    const y2 = ty + depth / 2;
+
+                    const [sx1, sy1] = transformPoint(x1, y1);
+                    const [sx2, sy2] = transformPoint(x2, y2);
+
+                    return (
+                      <Line
+                        points={[
+                          sx1, sy1,
+                          sx2, sy1,
+                          sx2, sy2,
+                          sx1, sy2,
+                        ]}
+                        closed
+                        fill="#38bdf833"
+                        stroke="#0284c7"
+                        strokeWidth={2}
+                        listening={false}
+                      />
+                    );
+                  })()
+                )} */}
 
 
                 {/* =============================================
