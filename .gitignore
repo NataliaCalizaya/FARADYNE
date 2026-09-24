@@ -7,10 +7,16 @@ env/
 .env 
 
 # Bytecode y cache de Python 
-__pycache__/ 
+__pycache__
+_pycache_ 
 *.pyc 
 *.pyo 
 .pytest_cache/ 
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+
 
 # Archivos subidos por los usuarios (planos DXF/PDF) 
 backend/uploads/ 
