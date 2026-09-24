@@ -16,8 +16,10 @@ __pycache__/
 backend/uploads/ 
 frontend/dist/ 
 backend/.venv/ 
+backend/venv/ 
 
 # Dependencias de Node
+frontend/node_modules/
 node_modules/
 
 # Editor / IDE 
