@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, status
 from app.repositories.modelo3d_repository import Modelo3DRepository
@@ -77,6 +78,7 @@ def calculate_and_save_nivel_proteccion(payload: NivelProteccionCreateRequest) -
         requiere_spcr=risk_result["requiere_spcr"],
         nivel_calculado=risk_result["nivel_proteccion_calculado"],
         eficiencia=risk_result["eficiencia_proteccion"],
+        radio_esfera=risk_result["radio_esfera_rodante_r"],
         factores_riesgo=risk_result["factores_riesgo"],
     )
 
@@ -96,7 +98,7 @@ def calculate_and_save_nivel_proteccion(payload: NivelProteccionCreateRequest) -
         "nivel_proteccion_calculado": saved_db.get("nivel", risk_result["nivel_proteccion_calculado"]),
         "eficiencia_proteccion": saved_db.get("eficiencia_minima", risk_result["eficiencia_proteccion"]),
         "factores_riesgo": risk_result.get("factores_riesgo", {}),
-        "fecha_calculo": saved_db.get("fecha_calculo"),
+        "fecha_calculo": datetime.now(),
     }
 
 
@@ -123,9 +125,9 @@ def get_nivel_proteccion_by_proyecto(idProyecto: str) -> Dict[str, Any]:
         "frecuencia_impactos_nd": record.get("nd", 0.0),
         "frecuencia_tolerable_nc": record.get("nc", 0.0),
         "requiere_spcr": bool(record.get("nd", 0) > record.get("nc", 0)) if record.get("nc") else True,
-        "nivel_proteccion_calculado": record.get("nivel", "Nivel II"),
+        "nivel_proteccion_calculado": record.get("nivel", "II"),
         "eficiencia_proteccion": record.get("eficiencia_minima", 0.95),
         "factores_riesgo": record.get("factores_riesgo", {}),
-        "fecha_calculo": record.get("fecha_calculo"),
+        "fecha_calculo": datetime.now(),
     }
 

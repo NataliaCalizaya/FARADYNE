@@ -7,7 +7,7 @@ export const nivelesProteccionApi = {
    */
   calculateNivelProteccion: async (payload) => {
     const response = await apiClient.post('/niveles-proteccion', {
-      id_proyecto: payload.id_proyecto,
+      id_proyecto: String(payload.id_proyecto),
       id_zona: payload.id_zona || null,
       departamento: payload.departamento || 'Lima',
       longitud_edificacion: payload.longitud_edificacion ? parseFloat(payload.longitud_edificacion) : null,
