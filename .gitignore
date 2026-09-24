@@ -1,34 +1,40 @@
+# Entornos virtuales 
+venv/ 
+env/ 
+.venv/ 
 
-# Dependencias de Node
-node_modules/
-frontend/node_modules/
+# Variables de entorno (credenciales reales - NUNCA subir) 
+.env 
 
-# Entornos virtuales
-venv/
-env/
-.venv/
-
-# Variables de entorno (credenciales reales - NUNCA subir)
-.env
-
-# Bytecode y cache de Python
-__pycache__/
-*.pyc
-*.pyo
+# Bytecode y cache de Python 
+__pycache__
+_pycache_ 
+*.pyc 
+*.pyo 
+.pytest_cache/ 
+**/__pycache__/
+**/*.pyc
+**/*.pyo
 .pytest_cache/
 
-# Archivos subidos por los usuarios (planos DXF/PDF)
-backend/uploads/
-frontend/dist/
-backend/.venv/
 
-# Editor / IDE
-.vscode/
-.idea/
+# Archivos subidos por los usuarios (planos DXF/PDF) 
+backend/uploads/ 
+frontend/dist/ 
+backend/.venv/ 
+backend/venv/ 
 
-# Sistema operativo
-.DS_Store
-Thumbs.db
+# Dependencias de Node
+frontend/node_modules/
+node_modules/
 
-# Logs
+# Editor / IDE 
+.vscode/ 
+.idea/ 
+
+# Sistema operativo 
+.DS_Store 
+Thumbs.db 
+
+# Logs 
 *.log
