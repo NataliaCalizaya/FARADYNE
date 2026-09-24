@@ -3,11 +3,16 @@ import { Upload, FileText, AlertCircle, CheckCircle2, Loader2, Cpu, Edit3 } from
 import { planosApi } from '../api/planos';
 import { GeometriaViewer } from '../components/GeometriaViewer/GeometriaViewer';
 
-export const CargarYValidarPlano = ({ idProyecto, onPlanoUploaded, onGeometriaConfirmed, onNext }) => {
+export const CargarYValidarPlano = ({ idProyecto,   idPlano: idPlanoProp,
+  idModelo2D: idModelo2DProp, onPlanoUploaded, onGeometriaConfirmed, onNext }) => {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [uploadedData, setUploadedData] = useState(null);
+  // Si App.jsx ya tiene un plano cargado de una visita anterior a este paso,
+  // se reconstruye acá en vez de arrancar en null y perder el visor.
+  const [uploadedData, setUploadedData] = useState(() =>
+    idPlanoProp ? { id: idPlanoProp, id_modelo2d: idModelo2DProp } : null
+  );
   const [isValidated, setIsValidated] = useState(false);
 
   const handleFileChange = (e) => {
@@ -17,6 +22,7 @@ export const CargarYValidarPlano = ({ idProyecto, onPlanoUploaded, onGeometriaCo
       setError(null);
     }
   };
+
 
   const handleUpload = async () => {
     if (!file) {
@@ -100,16 +106,18 @@ export const CargarYValidarPlano = ({ idProyecto, onPlanoUploaded, onGeometriaCo
       </div>
 
       {/* 2D Geometry Corrector Section */}
-      {uploadedData ? (
+      {uploadedData?.id ? (
         <div className="space-y-4">
-          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-md text-xs">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>
-                Plano <strong>{uploadedData.nombre_archivo}</strong> interpretado correctamente. Revise y edite la geometría 2D a continuación.
-              </span>
+          {uploadedData.nombre_archivo && (
+            <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-md text-xs">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  Plano <strong>{uploadedData.nombre_archivo}</strong> interpretado correctamente. Revise y edite la geometría 2D a continuación.
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           <GeometriaViewer
             idPlano={uploadedData.id}

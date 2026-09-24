@@ -150,6 +150,8 @@ export function App() {
         {currentStep === 1 && (
           <CargarYValidarPlano
             idProyecto={idProyecto}
+            idPlano={idPlano}          
+            idModelo2D={idModelo2D} 
             onPlanoUploaded={handlePlanoUploaded}
             onGeometriaConfirmed={handleGeometriaConfirmed}
             onNext={() => setCurrentStep(2)}

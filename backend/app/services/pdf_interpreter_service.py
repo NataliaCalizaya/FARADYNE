@@ -493,8 +493,8 @@ class PDFInterpreterService:
         ) * factor_xy
 
         return {
-            "x": x_m,
-            "y": y_m,
+            "x": -x_m,
+            "y": -y_m,
         }
 
     @classmethod

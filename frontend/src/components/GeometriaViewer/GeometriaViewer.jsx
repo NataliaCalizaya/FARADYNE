@@ -537,8 +537,8 @@ export const GeometriaViewer = ({
 // Ejemplo para 90 grados a la izquierda: T.rotation = -Math.PI / 2
 
   const transformPoint = (x, y) => [
-    -y * T.scale + T.offsetX,
-    -x * T.scale + T.offsetY,
+    y * T.scale + T.offsetX,
+    x * T.scale + T.offsetY,
   ];
 
   const inverseTransformPoint = (screenX, screenY) => {
@@ -548,8 +548,8 @@ export const GeometriaViewer = ({
     // Inversa de la rotación 90° antihoraria:
     // (x, y) -> (y, -x)
     return [
-      -y,
-      -x,
+      y,
+      x,
     ];
   };
 
