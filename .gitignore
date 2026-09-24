@@ -1,1 +1,40 @@
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Variables de entorno (credenciales reales - NUNCA subir)
+.env
+
+# Bytecode y cache de Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Archivos subidos por los usuarios (planos DXF/PDF)
 backend/uploads/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Dependencias de Node
+node_modules/
+
+# Cache de Vite
+.vite/
+
+# Build de producción de Vite
+frontend/dist/
+
+# Archivos generados de npm
+npm-debug.log*

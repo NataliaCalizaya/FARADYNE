@@ -36,24 +36,20 @@ def calculate_tolerable_strikes_nc(
     return round(1.5e-3 / denominator, 6)
 
 
-def determine_spcr_level(nd: float, nc: float) -> Tuple[bool, str, float, float]:
-    """Pure function: Determines if SPCR protection is required, efficiency E, level (I..IV), and rolling sphere radius R.
-    Returns (requiere_spcr, nivel_str, eficiencia, radio_esfera_r).
-    """
+def determine_spcr_level(nd, nc):
     if nd <= nc or nd <= 0:
-        return False, "No requiere (Nivel IV recomendado)", 0.80, 60.0
+        return False, "IV", 0.80, 60.0
 
     efficiency = 1.0 - (nc / nd)
 
     if efficiency >= 0.98:
-        return True, "Nivel I", 0.98, 20.0
+        return True, "I", 0.98, 20.0
     elif efficiency >= 0.95:
-        return True, "Nivel II", 0.95, 30.0
+        return True, "II", 0.95, 30.0
     elif efficiency >= 0.90:
-        return True, "Nivel III", 0.90, 45.0
+        return True, "III", 0.90, 45.0
     else:
-        return True, "Nivel IV", 0.80, 60.0
-
+        return True, "IV", 0.80, 60.0
 
 def check_point_coverage_rolling_sphere(
     point: Tuple[float, float, float],
