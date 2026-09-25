@@ -1,0 +1,149 @@
+/* ============================================================
+   dark-mode.css  –  Reglas para el modo oscuro (.dark-mode)
+   ============================================================ */
+
+.dark-mode {
+  min-height: 100dvh;
+  color: #e2e8f0;
+  background-color: #0f172a;
+  background-image:
+    radial-gradient(ellipse 38rem 30rem at 0% 35%, rgba(14, 116, 144, 0.18), transparent 68%),
+    radial-gradient(ellipse 32rem 30rem at 100% 85%, rgba(30, 64, 175, 0.18), transparent 70%),
+    linear-gradient(rgba(15, 23, 42, 0.92), rgba(8, 15, 30, 0.97)),
+    url('/fondoFaradyne.jpg');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+body:has(.dark-mode) {
+  background-color: #0f172a;
+  background-image: none;
+}
+
+/* Utilidades generales en dark-mode */
+.dark-mode .bg-white,
+.dark-mode .bg-white\/90,
+.dark-mode .bg-white\/80,
+.dark-mode .bg-slate-100,
+.dark-mode .bg-slate-50,
+.dark-mode .bg-gray-50 {
+  background-color: #172033 !important;
+  box-shadow: 0 12px 28px -22px rgba(0, 0, 0, 0.9);
+}
+
+.dark-mode .bg-gray-100 {
+  background-color: #1e293b !important;
+}
+
+.dark-mode .bg-gray-200 {
+  background-color: #334155 !important;
+}
+
+.dark-mode .hover\:bg-gray-300:hover {
+  background-color: #475569 !important;
+}
+
+.dark-mode .border-gray-100,
+.dark-mode .border-gray-200,
+.dark-mode .border-gray-300 {
+  border-color: #334155 !important;
+}
+
+/* Tipografía */
+.dark-mode .text-gray-900,
+.dark-mode .text-gray-800,
+.dark-mode .text-gray-700,
+.dark-mode .text-gray-600,
+.dark-mode .text-gray-500 {
+  color: #cbd5e1 !important;
+}
+
+.dark-mode .text-gray-400 {
+  color: #94a3b8 !important;
+}
+
+.dark-mode .text-slate-900,
+.dark-mode .text-slate-800,
+.dark-mode .text-slate-700,
+.dark-mode .text-slate-600 {
+  color: #e2e8f0 !important;
+}
+
+.dark-mode .text-brand-blue {
+  color: #7dd3fc !important;
+}
+
+/* Hovers */
+.dark-mode .hover\:bg-gray-50:hover,
+.dark-mode .hover\:bg-slate-50:hover {
+  background-color: #223047 !important;
+}
+
+/* Tablas */
+.dark-mode table thead {
+  background-color: #24334b !important;
+}
+
+.dark-mode table tbody tr:hover {
+  background-color: #1d2a3d !important;
+}
+
+/* Fondos tintados */
+.dark-mode .bg-blue-50,
+.dark-mode .bg-blue-50\/95 {
+  color: #bfdbfe;
+  background-color: rgba(30, 58, 95, 0.78) !important;
+}
+
+.dark-mode .border-blue-200 {
+  border-color: #285581 !important;
+}
+
+.dark-mode .bg-emerald-50 {
+  background-color: rgba(6, 78, 59, 0.65) !important;
+}
+
+.dark-mode .bg-red-50 {
+  background-color: rgba(127, 29, 29, 0.46) !important;
+}
+
+/* Form inputs & selects */
+.dark-mode input,
+.dark-mode textarea,
+.dark-mode .custom-select-trigger,
+.dark-mode .custom-select-menu,
+.dark-mode .custom-select-option {
+  color: #e2e8f0;
+  background-color: #0f172a;
+  border-color: #475569;
+}
+
+.dark-mode .custom-select-option:hover,
+.dark-mode .custom-select-option:focus-visible,
+.dark-mode .custom-select-option.is-selected {
+  color: #e0f2fe;
+  background-color: #1e3a5f;
+}
+
+.dark-mode .input-electric:focus,
+.dark-mode .custom-select-trigger:hover,
+.dark-mode .custom-select-trigger:focus-visible {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
+}
+
+/* Theme Toggle button */
+.dark-mode .theme-toggle {
+  color: #1e3a5f;
+  background: linear-gradient(135deg, #ffffff, #eaf4ff);
+  border-color: rgba(125, 211, 252, 0.8);
+  box-shadow: 0 14px 30px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+}
+
+.dark-mode .theme-toggle:hover {
+  color: #07559b;
+  background: linear-gradient(135deg, #ffffff, #d7eeff);
+  box-shadow: 0 16px 35px -10px rgba(0, 0, 0, 0.9), 0 0 18px rgba(125, 211, 252, 0.28);
+}

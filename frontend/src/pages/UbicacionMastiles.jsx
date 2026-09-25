@@ -147,7 +147,16 @@ export const UbicacionMastiles = ({
         if (cancelled) return;
 
         if (!m2dId) {
-          setError('No se encontró el Modelo 2D. Asegúrese de haber completado el paso anterior.');
+          // Un 3D ya existente puede consultarse sin abrir el editor 2D.
+          // Para crear o ubicar mástiles, en cambio, el Modelo 2D es obligatorio.
+          if (idModelo3DProp) {
+            setIdModelo3D(idModelo3DProp);
+            await loadMasts(idModelo3DProp);
+            await loadCoverage();
+            setError('No se encontró el Modelo 2D. Se muestra el Modelo 3D disponible, pero para ubicar mástiles debe completar el paso de geometría.');
+          } else {
+            setError('No se encontró el Modelo 2D. Asegúrese de haber completado el paso anterior.');
+          }
           return;
         }
 
@@ -413,17 +422,13 @@ export const UbicacionMastiles = ({
         </div>
       </div>
 
-      {/* ── Layout principal ── */}
-      <div className={`grid gap-4 ${viewMode === 'split' ? 'grid-cols-1 xl:grid-cols-2' : 'grid-cols-1'}`}>
-
-        {/* Columna izquierda: visores.
-            En modo "split" (2D + 3D) van EN PARALELO, uno al lado del otro
-            (grid de 2 columnas desde `lg`); en "solo 2d"/"solo 3d" ocupan
-            todo el ancho disponible, uno solo a la vez. */}
+      {/* ── Visores: ocupan el ancho completo para que no se compriman ── */}
+      <div>
+        {/* split en 2 columnas SOLO si el viewer 3D está disponible */}
         <div
           className={
-            viewMode === 'split'
-              ? 'grid grid-cols-1 lg:grid-cols-2  gap-4 min-w-0 items-start'
+            viewMode === 'split' && idModelo3D && resolvedModelo2DId
+              ? 'grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0 items-start'
               : 'flex flex-col gap-4 min-w-0'
           }
         >
@@ -482,32 +487,32 @@ export const UbicacionMastiles = ({
             </div>
           )}
         </div>
-
       </div>
-              {/* Columna derecha: panel de control */}
-        <div className="grid grid-cols-1 gap-4 bg-white border border-gray-200 rounded-md p-4 shadow-sm items-start md:items-center">
-          <MastilPositioner
-            masts={masts}
-            mastHeight={mastHeight}
-            onHeightChange={setMastHeight}
-            onDeleteMast={handleDeleteMast}
-            onSelectMast={handleSelectMast}
-            selectedMastId={selectedMastId}
-            onUpdateMastHeight={handleUpdateMastHeight}
-            onDeselectMast={() => setSelectedMastId(null)}
-            coverageData={coverageData}
-            placing={placing}
-            onCancelPlace={() => setPlacing(false)}
-          />
-        </div>
+
+      {/* ── Datos y controles debajo, en dos columnas ── */}
+      <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm">
+        <MastilPositioner
+          masts={masts}
+          mastHeight={mastHeight}
+          onHeightChange={setMastHeight}
+          onDeleteMast={handleDeleteMast}
+          onSelectMast={handleSelectMast}
+          selectedMastId={selectedMastId}
+          onUpdateMastHeight={handleUpdateMastHeight}
+          onDeselectMast={() => setSelectedMastId(null)}
+          coverageData={coverageData}
+          placing={placing}
+          onCancelPlace={() => setPlacing(false)}
+        />
+      </div>
       <button
-            type="button"
-            onClick={onNext}
-            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs transition flex items-center justify-center gap-2"
-          >
-            <Box className="w-4 h-4" />
-            Confirmar Ubicación → Continuar
-          </button>
+        type="button"
+        onClick={onNext}
+        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs transition flex items-center justify-center gap-2"
+      >
+        <Box className="w-4 h-4" />
+        Confirmar Ubicación → Continuar
+      </button>
     </div>
   );
 };

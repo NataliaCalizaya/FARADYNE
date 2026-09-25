@@ -286,6 +286,7 @@ export function App() {
           <GenerarModelo3DPage
             idModelo2D={idModelo2D}
             idModelo3D={idModelo3D}
+            onBack={() => setCurrentStep(1)}
             onNext={() => setCurrentStep(3)}
           />
         )}
