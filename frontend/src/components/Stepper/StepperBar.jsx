@@ -51,20 +51,16 @@ export const StepperBar = ({ currentStep, onStepChange, isGeometriaValidada = fa
         {STEPS.map((step) => {
           const isDone = currentStep > step.id;
           const isActive = currentStep === step.id;
-          const isDisabled = step.id === 2 && !isGeometriaValidada && currentStep < 2;
 
           return (
             <div
               key={step.id}
-              onClick={() => {
-                if (!isDisabled) onStepChange(step.id);
-              }}
-              className={`group relative z-10 flex flex-col items-center gap-1.5 shrink-0 px-1.5 ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-                }`}
+              onClick={() => onStepChange(step.id)}
+              className="group relative z-10 flex flex-col items-center gap-1.5 shrink-0 px-1.5 cursor-pointer"
             >
               {/* Tooltip */}
               <div className="stepper-tooltip absolute -top-9 left-1/2 whitespace-nowrap bg-slate-900 text-white text-[10px] px-2.5 py-1.5 rounded shadow-lg z-20">
-                {isDisabled ? 'Confirmá la geometría en el paso anterior' : step.desc}
+                {step.desc}
               </div>
 
               <div
