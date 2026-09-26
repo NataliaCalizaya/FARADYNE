@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, HTTPException, status
 from app.repositories.mastil_repository import MastilRepository
 from app.repositories.modelo3d_repository import Modelo3DRepository
@@ -15,6 +15,38 @@ from app.schemas.mastil_schema import (
 from app.services.spda_service import SPDAService
 
 router = APIRouter(prefix="/mastiles", tags=["HU05 - Mástiles Captores"])
+
+
+def _extraer_dimensiones_modelo3d(modelo3d: Dict[str, Any]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Extrae longitud, anchura y altura desde el Modelo3D ya generado.
+
+    `geometria_volumetrica` es la metadata que arma
+    model3d_generator_service.generar_modelo_3d(...):
+        - "bbox": [bx0, by0, bx1, by1]  (bounding box de TODOS los polígonos
+          del Modelo2D, en metros) -> longitud/anchura del edificio.
+        - "levels": lista ordenada de las cotas de altura (en metros)
+          detectadas en el Modelo2D -> se usa el mayor valor como altura H
+          si la columna `altura_h` no está disponible.
+
+    (Misma lógica que app.routers.niveles_proteccion._extraer_dimensiones_modelo3d;
+    si se movió a un módulo compartido, importar de ahí en vez de duplicar.)
+    """
+    geometria = modelo3d.get("geometria_volumetrica") or {}
+
+    bbox = geometria.get("bbox")
+    length = width = None
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        bx0, by0, bx1, by1 = bbox
+        length = round(float(bx1) - float(bx0), 2)
+        width = round(float(by1) - float(by0), 2)
+
+    height = modelo3d.get("altura_h")
+    if not height or float(height) <= 0:
+        levels = geometria.get("levels") or []
+        alturas = [float(v) for v in levels if v is not None]
+        height = max(alturas) if alturas else None
+
+    return length, width, (float(height) if height else None)
 
 
 def _resolve_modelo3d(payload: MastilCreateRequest) -> tuple[Dict[str, Any], str, str]:
@@ -53,30 +85,6 @@ def _resolve_modelo3d(payload: MastilCreateRequest) -> tuple[Dict[str, Any], str
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail="Debe proveer 'id_modelo3d' o 'id_modelo2d'.",
     )
-
-
-# @router.post("", response_model=MastilResponse, status_code=status.HTTP_201_CREATED)
-# def create_mastil(payload: MastilCreateRequest) -> Dict[str, Any]:
-#     """HU05: Añade un mástil captor a un Modelo 3D.
-    
-#     Acepta `id_modelo3d` directo o `id_modelo2d` (el endpoint resuelve el modelo 3D).
-#     """
-#     _modelo3d, id_modelo2d, id_proyecto = _resolve_modelo3d(payload)
-
-#     radio_cobertura = payload.altura * 2.0
-
-#     mastil = MastilRepository.create_mastil(
-#         id_modelo2d=id_modelo2d,
-#         id_proyecto=id_proyecto or None,
-#         posicion_x=payload.posicion_x,
-#         posicion_y=payload.posicion_y,
-#         posicion_z=payload.posicion_z,
-#         altura=payload.altura,
-#         tipo=payload.tipo,
-#         radio_cobertura=radio_cobertura,
-#     )
-
-#     return mastil
 
 
 @router.post("", response_model=MastilResponse, status_code=status.HTTP_201_CREATED)
@@ -118,8 +126,6 @@ def create_mastil(payload: MastilCreateRequest) -> Dict[str, Any]:
         radio_cobertura=radio_cobertura,
     )
     return mastil
-
-
 
 
 @router.get("/modelo3d/{id_modelo3d}", response_model=List[MastilResponse])
@@ -222,12 +228,19 @@ def get_cobertura_mastiles(idProyecto: str) -> Dict[str, Any]:
         # Sin nivel asignado: usar Nivel I como predeterminado
         pass
 
-    # 2. Dimensiones del modelo 3D
+    # 2. Dimensiones del modelo 3D: "geometria_volumetrica" no tiene una
+    #    clave "dimensiones" (eso siempre caía al fallback). Lo real es
+    #    "bbox" [bx0,by0,bx1,by1] para L/W y "altura_h" (o "levels") para H.
     dims = {"longitud": 20.0, "anchura": 15.0, "altura": 7.5}
     try:
         modelo3d = Modelo3DRepository.get_modelo3d_by_proyecto_id(idProyecto)
         if modelo3d:
-            dims = modelo3d.get("geometria_volumetrica", {}).get("dimensiones", dims)
+            length, width, height = _extraer_dimensiones_modelo3d(modelo3d)
+            dims = {
+                "longitud": length or dims["longitud"],
+                "anchura": width or dims["anchura"],
+                "altura": height or dims["altura"],
+            }
     except Exception:
         pass
 
@@ -291,4 +304,3 @@ def get_cobertura_mastiles(idProyecto: str) -> Dict[str, Any]:
         "porcentaje_cobertura": evaluation["porcentaje_cobertura"],
         "advertencias": evaluation["advertencias"],
     }
-

@@ -89,18 +89,18 @@ export const DatosProyecto = ({ projectData, setProjectData, onNext }) => {
           <div className="project-field">
             <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 uppercase mb-1">
               <MapPin className="w-3.5 h-3.5 text-brand-blue" />
-              Provincia / Región
+              Localidad
             </label>
             <SelectField
               name="region"
               value={formData.region}
               onChange={handleChange}
               options={[
-                { value: 'Buenos Aires', label: 'Buenos Aires' },
-                { value: 'CABA', label: 'CABA' },
-                { value: 'Córdoba', label: 'Córdoba' },
-                { value: 'Santa Fe', label: 'Santa Fe' },
-                { value: 'Mendoza', label: 'Mendoza' },
+                { value: 'Rawson', label: 'Rawson' },
+                { value: 'San Salvador de Jujuy', label: 'San Salvador de Jujuy' },
+                { value: 'La Quiaca', label: 'La Quiaca' },
+                { value: 'Tartagal', label: 'Tartagal' },
+                { value: 'Monteros', label: 'Monteros' },
               ]}
             />
           </div>

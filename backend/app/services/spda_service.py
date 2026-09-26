@@ -1,62 +1,25 @@
+"""
+app.services.spda_service
+
+Servicio de evaluación de cobertura de mástiles captores (HU05) mediante el
+Método de la Esfera Rodante. Lo usa el router de mástiles para verificar
+qué puntos de la envolvente del edificio quedan protegidos por los mástiles
+ya colocados, usando como radio el que corresponde al Nivel de Protección
+calculado en HU04 (ver app.services.level_protection_service).
+"""
+
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-
-def calculate_equivalent_collection_area_ae(length: float, width: float, height: float) -> float:
-    """Pure function: Calculates equivalent collection area Ae (m²) according to IEC 62305-2 / IRAM 2184-2.
-    Formula: Ae = (L * W) + 2 * H * (L + W) + pi * H^2
-    """
-    if length <= 0 or width <= 0 or height <= 0:
-        return 0.0
-    area_base = length * width
-    area_perimeter = 2.0 * height * (length + width)
-    area_corners = math.pi * (height ** 2)
-    return round(area_base + area_perimeter + area_corners, 2)
-
-
-def calculate_direct_strikes_nd(density_ng: float, area_ae: float, factor_cd: float = 1.0) -> float:
-    """Pure function: Calculates expected annual direct lightning strikes Nd.
-    Formula: Nd = Ng * Ae * Cd * 10^-6
-    """
-    return round(density_ng * area_ae * factor_cd * 1e-6, 6)
-
-
-def calculate_tolerable_strikes_nc(
-    factor_cb: float = 1.0,
-    factor_cc: float = 1.0,
-    factor_cd: float = 1.0,
-    factor_ce: float = 1.0,
-) -> float:
-    """Pure function: Calculates tolerable annual lightning strike frequency limit Nc.
-    Formula: Nc = 1.5 * 10^-3 / (Cb * Cc * Cd * Ce)
-    """
-    denominator = factor_cb * factor_cc * factor_cd * factor_ce
-    if denominator <= 0:
-        denominator = 1.0
-    return round(1.5e-3 / denominator, 6)
-
-
-def determine_spcr_level(nd, nc):
-    if nd <= nc or nd <= 0:
-        return False, "IV", 0.80, 60.0
-
-    efficiency = 1.0 - (nc / nd)
-
-    if efficiency >= 0.98:
-        return True, "I", 0.98, 20.0
-    elif efficiency >= 0.95:
-        return True, "II", 0.95, 30.0
-    elif efficiency >= 0.90:
-        return True, "III", 0.90, 45.0
-    else:
-        return True, "IV", 0.80, 60.0
 
 def check_point_coverage_rolling_sphere(
     point: Tuple[float, float, float],
     masts: List[Dict[str, Any]],
     rolling_sphere_radius: float = 30.0,
 ) -> Tuple[bool, float, Optional[str]]:
-    """Pure function: Checks if a 3D point (x,y,z) is protected by any of the masts using the Rolling Sphere Method.
+    """Pure function: Checks if a 3D point (x,y,z) is protected by any of the
+    masts using the Rolling Sphere Method.
+
     Returns (is_protected, min_distance_to_mast, protective_mast_id).
     """
     px, py, pz = point
@@ -93,44 +56,7 @@ def check_point_coverage_rolling_sphere(
 
 
 class SPDAService:
-    """Service to execute IEC 62305 / IRAM 2184 SPDA risk calculations and coverage validation."""
-
-    @staticmethod
-    def calculate_risk(
-        length: float,
-        width: float,
-        height: float,
-        density_ng: float,
-        factor_cd: float = 1.0,
-        factor_cb: float = 1.0,
-        factor_cc: float = 1.0,
-        factor_ce: float = 1.0,
-    ) -> Dict[str, Any]:
-        """Calculates Ae, Nd, Nc, and SPCR requirement for building dimensions and environmental factors."""
-        ae = calculate_equivalent_collection_area_ae(length, width, height)
-        nd = calculate_direct_strikes_nd(density_ng, ae, factor_cd)
-        nc = calculate_tolerable_strikes_nc(factor_cb, factor_cc, factor_cd, factor_ce)
-        requiere_spcr, nivel, eficiencia, radio_r = determine_spcr_level(nd, nc)
-
-        return {
-            "longitud": length,
-            "anchura": width,
-            "altura": height,
-            "area_equivalente_ae": ae,
-            "frecuencia_impactos_nd": nd,
-            "frecuencia_tolerable_nc": nc,
-            "requiere_spcr": requiere_spcr,
-            "nivel_proteccion_calculado": nivel,
-            "eficiencia_proteccion": eficiencia,
-            "radio_esfera_rodante_r": radio_r,
-            "factores_riesgo": {
-                "density_ng": density_ng,
-                "factor_cd": factor_cd,
-                "factor_cb": factor_cb,
-                "factor_cc": factor_cc,
-                "factor_ce": factor_ce,
-            },
-        }
+    """Servicio de evaluación de cobertura de mástiles (HU05)."""
 
     @staticmethod
     def evaluate_masts_coverage(
@@ -176,14 +102,17 @@ class SPDAService:
                 puntos_desprotegidos.append(item)
 
         total_pts = len(grid_points)
-        cov_percent = round((len(puntos_cobertura) / total_pts) * 100.0, 2) if total_pts > 0 else 0.0
+        cov_percent = (
+            round((len(puntos_cobertura) / total_pts) * 100.0, 2) if total_pts > 0 else 0.0
+        )
 
         advertencias = []
         if len(masts) == 0:
             advertencias.append("No se ha colocado ningún mástil captor en la estructura.")
         elif cov_percent < 100.0:
             advertencias.append(
-                f"La cobertura es del {cov_percent}%. Existen {len(puntos_desprotegidos)} puntos de la cubierta sin protección contra descargas atmosféricas."
+                f"La cobertura es del {cov_percent}%. Existen {len(puntos_desprotegidos)} "
+                "puntos de la cubierta sin protección contra descargas atmosféricas."
             )
 
         return {
