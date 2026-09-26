@@ -40,7 +40,7 @@ class NivelProteccionCreateRequest(NivelProteccionCalcularRequest):
 
 
 class NivelProteccionResponse(BaseModel):
-    id: str
+    id_nivel_proteccion: str
     id_proyecto: str
     id_zona: Optional[str] = None
     longitud_edificacion: float

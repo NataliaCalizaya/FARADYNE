@@ -117,14 +117,12 @@ class EditorModelo2DService:
 
         modelo["poligonos"] = poligonos
         modelo["cotas_altura"] = niveles
-        modelo["validado"] = False
         modelo.update(extra)
 
         return PlanoRepository.update_modelo2d(
             id_modelo2d=id_modelo2d,
             poligonos=poligonos,
             cotas_altura=niveles,
-            validado=False,
             **extra,
         )
 

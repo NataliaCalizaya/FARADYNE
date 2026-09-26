@@ -11,4 +11,5 @@ class Plano:
     ruta_archivo: str = ""
     fecha_carga: Optional[date] = None
     id_proyecto: Optional[int] = None
+    
 

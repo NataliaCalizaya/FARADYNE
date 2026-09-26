@@ -1,7 +1,6 @@
 from typing import Optional
 from pydantic import BaseModel
 
-
 class ProyectoUbicacionResponse(BaseModel):
     """HU04: respuesta de GET /proyectos/{id_proyecto}/ubicacion.
 
@@ -12,6 +11,9 @@ class ProyectoUbicacionResponse(BaseModel):
     id_proyecto: str
     nombre: str
     ubicacion: Optional[str] = None
+    departamento: Optional[str] = None
+    provincia: Optional[str] = None
+    localidad: Optional[str] = None
 
     class Config:
         from_attributes = True

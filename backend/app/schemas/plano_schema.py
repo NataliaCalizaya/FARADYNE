@@ -25,9 +25,9 @@ class PlanoPreviewResponse(BaseModel):
     tipo_archivo: str
     ruta_archivo: Optional[str] = None
     bounding_box: Dict[str, Any] = Field(default_factory=dict)
-    capas: List[str] = Field(default_factory=list)
+    id_modelo2d: Optional[str] = None
+    capas: List[Any] = Field(default_factory=list)
     cotas_altura: List[Dict[str, Any]] = Field(default_factory=list)
     poligonos: List[Dict[str, Any]] = Field(default_factory=list)
     lineas: List[Dict[str, Any]] = Field(default_factory=list)
-    validado: bool = False
 

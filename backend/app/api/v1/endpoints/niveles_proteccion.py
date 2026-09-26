@@ -67,14 +67,15 @@ def _obtener_dimensiones_y_ng(
     Ng: desde la zona ceráunica correspondiente a la ubicación del proyecto.
     """
 
-    # 1. Zona ceráunica / Ng según ubicación del proyecto
+    # 1. Zona ceráunica / Ng según la localidad real del proyecto
     id_zona = id_zona_payload
     zona = None
     if id_zona:
         zona = NivelProteccionRepository.get_zona_ceraunica_by_id(id_zona)
     if not zona:
-        dept = departamento or "Lima"
-        zona = NivelProteccionRepository.get_zona_ceraunica_by_departamento(dept)
+        # Ya no se usa "departamento" como string libre: la zona sale de
+        # matchear proyecto.localidad contra zona_ceraunica.ciudad.
+        zona = NivelProteccionRepository.get_zona_ceraunica_by_departamento(id_proyecto)
         if zona:
             id_zona = str(zona.get("id_zona", zona.get("id", "")))
     density_ng = float(zona.get("ng", zona.get("densidad_rayos_ng", 2.5))) if zona else 2.5
@@ -175,7 +176,7 @@ def guardar_nivel_proteccion(payload: NivelProteccionCreateRequest) -> Dict[str,
     id_np = str(saved_db.get("id_nivel_proteccion", saved_db.get("id", "")))
 
     return {
-        "id": id_np,
+        "id_nivel_proteccion": id_np,
         "id_proyecto": str(saved_db.get("id_proyecto", payload.id_proyecto)),
         "id_zona": str(saved_db.get("id_zona")) if saved_db.get("id_zona") else None,
         "longitud_edificacion": saved_db.get("longitud_edificacion", length),
@@ -223,7 +224,7 @@ def get_nivel_proteccion_by_proyecto(idProyecto: str) -> Dict[str, Any]:
     recomendacion = determine_nivel_recomendado(nd, nc)
 
     return {
-        "id": id_np,
+        "id_nivel_proteccion": id_np,
         "id_proyecto": str(record.get("id_proyecto", idProyecto)),
         "id_zona": str(record.get("id_zona")) if record.get("id_zona") else None,
         "longitud_edificacion": record.get("longitud_edificacion", 20.0),

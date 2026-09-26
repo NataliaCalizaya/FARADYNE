@@ -16,21 +16,29 @@ export function App() {
   const [currentStep, setCurrentStep] = useState(0);
 
   // Global Project State
-  const [idProyecto, setIdProyecto] = useState(1);
+  const [idProyecto, setIdProyecto] = useState(null);
   const [idPlano, setIdPlano] = useState(null);
   const [idModelo2D, setIdModelo2D] = useState(null);
   const [idModelo3D, setIdModelo3D] = useState(null);
   const [isGeometriaValidada, setIsGeometriaValidada] = useState(false);
 
   const [projectData, setProjectData] = useState({
-    nombre: 'Centro Comercial ABC',
-    cliente: 'Constructora XYZ S.A.',
-    region: 'Buenos Aires',
-    proyectista: 'Ing. Juan García López',
+    nombre: '',
+    descripcion: '',
+    ubicacion: '',
+    departamento: '',
   });
 
   const handleLogin = () => {
     setIsAuthenticated(true);
+  };
+
+  // Recibe el UUID real del proyecto creado/actualizado en la BD
+  const handleProyectoCreado = (nuevoIdProyecto, proyectoData) => {
+    setIdProyecto(nuevoIdProyecto);
+    if (proyectoData) {
+      setProjectData((prev) => ({ ...prev, ...proyectoData }));
+    }
   };
 
   const handlePlanoUploaded = (planoData) => {
@@ -42,6 +50,10 @@ export function App() {
 
   const handleGeometriaConfirmed = (geoData) => {
     setIsGeometriaValidada(true);
+  };
+
+  const handleModelo3DGenerated = (modelo3dData) => {
+    if (modelo3dData?.id) setIdModelo3D(modelo3dData.id);
   };
 
   const handleNivelCalculated = (nivelData) => {
@@ -269,6 +281,8 @@ export function App() {
           <DatosProyecto
             projectData={projectData}
             setProjectData={setProjectData}
+            idProyecto={idProyecto}
+            onProyectoCreado={handleProyectoCreado}
             onNext={() => setCurrentStep(1)}
           />
         )}
@@ -286,6 +300,7 @@ export function App() {
           <GenerarModelo3DPage
             idModelo2D={idModelo2D}
             idModelo3D={idModelo3D}
+            onModelo3DGenerated={handleModelo3DGenerated}
             onNext={() => setCurrentStep(3)}
           />
         )}

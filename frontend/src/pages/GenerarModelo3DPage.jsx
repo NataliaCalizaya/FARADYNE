@@ -3,7 +3,7 @@ import { Box, AlertCircle, CheckCircle2, ArrowRight, Loader2, Info } from 'lucid
 import { Modelo3DViewer } from '../components/Modelo3DViewer/Modelo3DViewer';
 import { modelos3dApi } from '../api/modelos3d';
 
-export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
+export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onModelo3DGenerated, onNext }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modelo3dData, setModelo3dData] = useState(null);
@@ -18,19 +18,19 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext }) => {
     setLoading(true);
     setError(null);
     try {
-      // Must send an object with id_modelo2d as an integer
-      const payload = { idModelo2D: String(id2d) };
-      //console.log("📦 Enviando payload a FastAPI:", payload);
+      // El schema Pydantic acepta tanto 'idModelo2D' (alias) como 'id_modelo2d'
+      const payload = { id_modelo2d: String(id2d) };
 
       const data = await modelos3dApi.generateModelo3D(payload);
       setModelo3dData(data);
+      // Propagar el ID del modelo 3D al componente padre
+      if (onModelo3DGenerated) onModelo3DGenerated(data);
     } catch (err) {
-      console.log("🚨 Respuesta de FastAPI (Motivo del 422):", err.response?.data);
-      
+      console.log('Respuesta de FastAPI (detalle del error):', err.response?.data);
       console.error('Error al generar modelo 3D:', err);
       const detail = err.response?.data?.detail;
       let msg = 'No se pudo generar el modelo 3D volumetricamente.';
-      
+
       if (Array.isArray(detail)) {
         msg = detail.map(e => `${e.loc[e.loc.length - 1]}: ${e.msg}`).join(' | ');
       } else if (typeof detail === 'string') {

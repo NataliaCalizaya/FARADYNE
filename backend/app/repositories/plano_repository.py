@@ -36,8 +36,9 @@ class PlanoRepository:
     ) -> Dict[str, Any]:
         """Save plano metadata in table 'plano' using parameterized SQL."""
         query = """
-            INSERT INTO plano (id_proyecto, nombre_archivo, tipo_archivo, ruta_archivo, fecha_carga)
-            VALUES (%s, %s, %s, %s, CURRENT_DATE)
+            INSERT INTO plano (id_proyecto, nombre_archivo, tipo_archivo, ruta_archivo, fecha_carga, tamano_bytes, metadatos)
+            VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s::jsonb)
+         
             RETURNING *;
         """
         params = (
@@ -45,6 +46,8 @@ class PlanoRepository:
             nombre_archivo,
             tipo_archivo,
             ruta_archivo,
+            tamano_bytes,
+            serialize_json(metadatos or {}),
         )
         resultado = execute_query(query, params, fetch=True)
         return resultado if resultado else {}

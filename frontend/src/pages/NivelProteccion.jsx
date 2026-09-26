@@ -12,10 +12,6 @@ const FACTORES_POR_DEFECTO = {
   factor_e: '1.0',
 };
 
-// Los <select> del form comparan por string con un decimal ("1.0", "0.3"...),
-// así que los factores que vienen de la API (numéricos) se normalizan así.
-const aFactorString = (n) => Number(n).toFixed(1);
-
 // Encabezado numerado, igual al usado dentro de NivelProteccionForm, para que
 // los 7 pasos del cálculo se vean como una única secuencia visual.
 const PasoHeader = ({ numero, titulo, colorClass = 'bg-brand-blue' }) => (
@@ -34,63 +30,110 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
   const [cargandoExistente, setCargandoExistente] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [ubicacionProyecto, setUbicacionProyecto] = useState(null);
+  const [localidadProyecto, setLocalidadProyecto] = useState(null);
+  // Datos "base" del proyecto (L/W/H + Ng), independientes de los factores de
+  // riesgo: se cargan solos al montar la página (Paso 1), sin esperar a que
+  // el usuario apriete "Calcular Frecuencia de Impactos" en el Paso 2. Se
+  // guardan aparte de `resultado` para que el Paso 7 (selección final +
+  // guardar) siga apareciendo recién después del cálculo completo.
+  const [datosProyecto, setDatosProyecto] = useState(null);
 
-  // Al entrar al paso, se intenta recuperar un cálculo ya guardado para el
-  // proyecto (factores elegidos + nivel_proteccion_seleccionado). Si no hay
-  // nada guardado todavía (404), se arranca con los factores por defecto y
-  // el nivel recomendado se toma cuando termine el primer cálculo.
+  // Este paso siempre arranca en blanco: acá NUNCA hay todavía un Nivel de
+  // Protección guardado para el proyecto (recién se crea al final, al
+  // apretar "Guardar"), así que no tiene sentido pedirlo acá — solo generaba
+  // un 404 esperado en cada carga de página. Ese GET
+  // (nivelesProteccionApi.getNivelProteccionByProyecto) debería usarse en el
+  // paso de Ubicación de Mástiles, que sí necesita el nivel ya guardado
+  // (radio de esfera, nivel elegido, etc.).
+
+  // useEffect(() => {
+  //   let activo = true;
+
+  //   const cargarExistente = async () => {
+  //     try {
+  //       const existente = await nivelesProteccionApi.getNivelProteccionByProyecto(idProyecto);
+  //       if (!activo) return;
+  //       setInitialFactores({
+  //         factor_a: aFactorString(existente.factores_riesgo.a),
+  //         factor_b: aFactorString(existente.factores_riesgo.b),
+  //         factor_c: aFactorString(existente.factores_riesgo.c),
+  //         factor_d: aFactorString(existente.factores_riesgo.d),
+  //         factor_e: aFactorString(existente.factores_riesgo.e),
+  //       });
+  //       setNivelSeleccionado(existente.nivel_proteccion_seleccionado);
+  //     } catch (err) {
+  //       if (!activo) return;
+  //       if (err.response?.status !== 404) {
+  //         console.error('Error al obtener el nivel de protección existente:', err);
+  //       }
+  //       setInitialFactores(FACTORES_POR_DEFECTO);
+  //     } finally {
+  //       if (activo) setCargandoExistente(false);
+  //     }
+  //   };
+
+  //   cargarExistente();
+  //   return () => {
+  //     activo = false;
+  //   };
+  // }, [idProyecto]);
+  useEffect(() => {
+    setInitialFactores(FACTORES_POR_DEFECTO);
+    setCargandoExistente(false);
+  }, [idProyecto]);
+
+  // Nombre + localidad del proyecto, para mostrar junto al Ng adoptado
+  // (Paso 1). Si el endpoint falla (proyecto sin localidad cargada, etc.),
+  // simplemente se muestra "No especificada" más abajo.
   useEffect(() => {
     let activo = true;
 
-    const cargarExistente = async () => {
+    const cargarLocalidad = async () => {
       try {
-        const existente = await nivelesProteccionApi.obtenerNivelProteccion(idProyecto);
+        const proyecto = await proyectosApi.obtenerUbicacionProyecto(idProyecto);
         if (!activo) return;
-        setInitialFactores({
-          factor_a: aFactorString(existente.factores_riesgo.a),
-          factor_b: aFactorString(existente.factores_riesgo.b),
-          factor_c: aFactorString(existente.factores_riesgo.c),
-          factor_d: aFactorString(existente.factores_riesgo.d),
-          factor_e: aFactorString(existente.factores_riesgo.e),
-        });
-        setNivelSeleccionado(existente.nivel_proteccion_seleccionado);
+        setLocalidadProyecto(proyecto.localidad || null);
       } catch (err) {
         if (!activo) return;
-        if (err.response?.status !== 404) {
-          console.error('Error al obtener el nivel de protección existente:', err);
-        }
-        setInitialFactores(FACTORES_POR_DEFECTO);
-      } finally {
-        if (activo) setCargandoExistente(false);
+        console.error('Error al obtener la localidad del proyecto:', err);
+        setLocalidadProyecto(null);
       }
     };
 
-    cargarExistente();
+    cargarLocalidad();
     return () => {
       activo = false;
     };
   }, [idProyecto]);
 
-  // Nombre + ubicación del proyecto, para mostrar junto al Ng adoptado
-  // (Paso 1). Si el endpoint falla (proyecto sin ubicación cargada, etc.),
-  // simplemente se muestra "No especificada" más abajo.
+  // L/W/H + Ng adoptado (Paso 1): se piden con /calcular (que no persiste
+  // nada) usando factores neutros, porque L/W/H/Ng no dependen de los
+  // factores A-E — solo Nc y el nivel recomendado sí. Así el Paso 1 ya
+  // aparece completo apenas se entra al paso, sin tocar el botón de calcular
+  // del Paso 2 ni disparar el Paso 7 (que sigue atado a `resultado`).
   useEffect(() => {
     let activo = true;
 
-    const cargarUbicacion = async () => {
+    const cargarDatosBase = async () => {
       try {
-        const proyecto = await proyectosApi.obtenerUbicacionProyecto(idProyecto);
+        const preview = await nivelesProteccionApi.calcularNivelProteccion({
+          id_proyecto: idProyecto,
+          ...FACTORES_POR_DEFECTO,
+        });
         if (!activo) return;
-        setUbicacionProyecto(proyecto.ubicacion || null);
+        setDatosProyecto({
+          longitud: preview.longitud,
+          anchura: preview.anchura,
+          altura: preview.altura,
+          densidad_ng: preview.densidad_ng,
+        });
       } catch (err) {
         if (!activo) return;
-        console.error('Error al obtener la ubicación del proyecto:', err);
-        setUbicacionProyecto(null);
+        console.error('Error al obtener los datos base (L/W/H/Ng) del proyecto:', err);
       }
     };
 
-    cargarUbicacion();
+    cargarDatosBase();
     return () => {
       activo = false;
     };
@@ -128,6 +171,14 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
     }
   };
 
+  // Los valores que muestra el Paso 1 salen de `datosProyecto` (cargado solo
+  // al montar) hasta que exista un `resultado` de un cálculo completo — en
+  // ese caso se usa `resultado`, que es lo más actualizado.
+  const l = resultado?.longitud ?? datosProyecto?.longitud;
+  const w = resultado?.anchura ?? datosProyecto?.anchura;
+  const h = resultado?.altura ?? datosProyecto?.altura;
+  const ng = resultado?.densidad_ng ?? datosProyecto?.densidad_ng;
+
   const tablaNiveles = resultado?.tabla_niveles || {};
 
   if (cargandoExistente) {
@@ -148,33 +199,33 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
         </div>
       </div>
 
-      {/* Paso 1: zona/ubicación, Ng adoptado y dimensiones identificadas */}
+      {/* Paso 1: localidad + Ng adoptado (uno al lado del otro) y dimensiones */}
       <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm">
         <PasoHeader numero={1} titulo="Zona y Datos Identificados del Proyecto" />
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
-          <div className="p-2 bg-slate-50 border border-slate-200 rounded col-span-2 md:col-span-1 flex flex-col justify-center">
+          <div className="p-2 bg-slate-50 border border-slate-200 rounded flex flex-col justify-center">
             <div className="text-[10px] text-gray-500 uppercase flex items-center justify-center gap-1">
-              <MapPin className="w-3 h-3" /> Ubicación
+              <MapPin className="w-3 h-3" /> Localidad
             </div>
             <div className="text-xs font-bold text-brand-blue leading-tight mt-1">
-              {ubicacionProyecto || 'No especificada'}
+              {localidadProyecto || 'No especificada'}
             </div>
-          </div>
-          <div className="p-2 bg-slate-50 border border-slate-200 rounded">
-            <div className="text-[10px] text-gray-500 uppercase">Longitud (L)</div>
-            <div className="text-lg font-bold text-brand-blue">{resultado ? `${resultado.longitud} m` : '—'}</div>
-          </div>
-          <div className="p-2 bg-slate-50 border border-slate-200 rounded">
-            <div className="text-[10px] text-gray-500 uppercase">Anchura (W)</div>
-            <div className="text-lg font-bold text-brand-blue">{resultado ? `${resultado.anchura} m` : '—'}</div>
-          </div>
-          <div className="p-2 bg-slate-50 border border-slate-200 rounded">
-            <div className="text-[10px] text-gray-500 uppercase">Altura (H)</div>
-            <div className="text-lg font-bold text-brand-blue">{resultado ? `${resultado.altura} m` : '—'}</div>
           </div>
           <div className="p-2 bg-slate-50 border border-slate-200 rounded">
             <div className="text-[10px] text-gray-500 uppercase">Ng adoptado</div>
-            <div className="text-lg font-bold text-brand-blue">{resultado ? resultado.densidad_ng : '—'}</div>
+            <div className="text-lg font-bold text-brand-blue">{ng ?? '—'}</div>
+          </div>
+          <div className="p-2 bg-slate-50 border border-slate-200 rounded">
+            <div className="text-[10px] text-gray-500 uppercase">Longitud (L)</div>
+            <div className="text-lg font-bold text-brand-blue">{l != null ? `${l} m` : '—'}</div>
+          </div>
+          <div className="p-2 bg-slate-50 border border-slate-200 rounded">
+            <div className="text-[10px] text-gray-500 uppercase">Anchura (W)</div>
+            <div className="text-lg font-bold text-brand-blue">{w != null ? `${w} m` : '—'}</div>
+          </div>
+          <div className="p-2 bg-slate-50 border border-slate-200 rounded">
+            <div className="text-[10px] text-gray-500 uppercase">Altura (H)</div>
+            <div className="text-lg font-bold text-brand-blue">{h != null ? `${h} m` : '—'}</div>
           </div>
         </div>
       </div>

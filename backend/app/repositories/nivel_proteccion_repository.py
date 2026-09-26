@@ -30,19 +30,26 @@ class NivelProteccionRepository:
         return fetch_one(query, (id_zona,))
 
     @staticmethod
-    def get_zona_ceraunica_by_departamento(departamento: str) -> Optional[Dict[str, Any]]:
-        """Fetch or create default zona_ceraunica by department/city name."""
-        query = "SELECT * FROM zona_ceraunica WHERE LOWER(nombre) = LOWER(%s) OR LOWER(ciudad) = LOWER(%s) LIMIT 1;"
-        zona = fetch_one(query, (departamento, departamento))
-        if not zona:
-            insert_query = """
-                INSERT INTO zona_ceraunica (nombre, ng, ciudad)
-                VALUES (%s, 2.5, %s)
-                RETURNING *;
-            """
-            res = execute_query(insert_query, (departamento, departamento), fetch=True)
-            zona = res[0] if isinstance(res, list) and res else (res if res else None)
-        return zona
+    def get_zona_ceraunica_by_departamento(id_proyecto: str) -> Optional[Dict[str, Any]]:
+        """Busca la zona ceráunica (y su Ng) a partir de la localidad real
+        cargada en el proyecto (proyecto.localidad), matcheando contra
+        zona_ceraunica.ciudad.
+
+        Reemplaza el comportamiento anterior, que insertaba una fila
+        "por defecto" en zona_ceraunica con Ng=2.5 hardcodeado cuando no
+        había match. Ahora, si la localidad del proyecto no matchea
+        ninguna zona real, se devuelve None y el llamador debe informar
+        el error en vez de inventar un Ng.
+        """
+        query = """
+            SELECT z.*
+            FROM proyecto p
+            JOIN zona_ceraunica z
+              ON LOWER(z.ciudad) = LOWER(p.localidad)
+            WHERE p.id_proyecto = %s
+            LIMIT 1;
+        """
+        return fetch_one(query, (id_proyecto,))
 
     @staticmethod
     def get_dimensiones_by_proyecto_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
