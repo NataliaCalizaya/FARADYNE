@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Info,
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   Map
 } from 'lucide-react';
 import { proyectosApi } from '../api/proyectos';
+import { zonaCeraunicaApi } from '../api/zonaCeraunica';
 
 export const DatosProyecto = ({ projectData, setProjectData, idProyecto, onProyectoCreado, onNext }) => {
   const [formData, setFormData] = useState({
@@ -30,9 +31,54 @@ export const DatosProyecto = ({ projectData, setProjectData, idProyecto, onProye
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
 
+  // ── Autocomplete de Localidad (contra zona_ceraunica.ciudad) ──────
+  const [localidadSugerencias, setLocalidadSugerencias] = useState([]);
+  const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    // Limpieza del timer pendiente al desmontar, para no setear estado
+    // sobre un componente ya desmontado.
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleLocalidadChange = (e) => {
+    const value = e.target.value;
+    setFormData((prev) => ({ ...prev, localidad: value }));
+    setMostrarSugerencias(true);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    const query = value.trim();
+    if (!query) {
+      setLocalidadSugerencias([]);
+      return;
+    }
+
+    // Debounce de 300ms: no dispara una consulta por cada tecla, solo
+    // cuando el usuario hace una pausa breve al escribir.
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const data = await zonaCeraunicaApi.buscarLocalidades(query);
+        setLocalidadSugerencias(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.warn('[DatosProyecto] No se pudieron buscar localidades:', err);
+        setLocalidadSugerencias([]);
+      }
+    }, 300);
+  };
+
+  const handleSeleccionarLocalidad = (ciudad) => {
+    setFormData((prev) => ({ ...prev, localidad: ciudad }));
+    setLocalidadSugerencias([]);
+    setMostrarSugerencias(false);
   };
 
   const handleSave = async (e) => {
@@ -181,7 +227,7 @@ export const DatosProyecto = ({ projectData, setProjectData, idProyecto, onProye
             />
           </div>
 
-          <div className="project-field">
+          <div className="project-field relative">
             <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 uppercase mb-1">
               <MapPin className="w-3.5 h-3.5 text-brand-blue" />
               Localidad
@@ -190,10 +236,30 @@ export const DatosProyecto = ({ projectData, setProjectData, idProyecto, onProye
               type="text"
               name="localidad"
               value={formData.localidad}
-              onChange={handleChange}
+              onChange={handleLocalidadChange}
+              onFocus={() => setMostrarSugerencias(true)}
+              onBlur={() => {
+                // Delay para que el click en un ítem de la lista (onMouseDown)
+                // se registre ANTES de que el blur oculte el desplegable.
+                setTimeout(() => setMostrarSugerencias(false), 150);
+              }}
               placeholder="Ej: San Salvador de Jujuy"
+              autoComplete="off"
               className="input-electric w-full p-2 border border-gray-300 rounded text-xs"
             />
+            {mostrarSugerencias && localidadSugerencias.length > 0 && (
+              <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg max-h-48 overflow-y-auto text-xs">
+                {localidadSugerencias.map((ciudad) => (
+                  <li
+                    key={ciudad}
+                    onMouseDown={() => handleSeleccionarLocalidad(ciudad)}
+                    className="px-3 py-1.5 cursor-pointer hover:bg-blue-50 hover:text-brand-blue"
+                  >
+                    {ciudad}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="project-field md:col-span-2">

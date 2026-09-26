@@ -90,12 +90,14 @@ class ProyectoRepository:
     def update_proyecto(
         id_proyecto: str,
         nombre: Optional[str] = None,
+        cliente: Optional[str] = None,
         descripcion: Optional[str] = None,
         ubicacion: Optional[str] = None,
         departamento: Optional[str] = None,
         provincia: Optional[str] = None,
         localidad: Optional[str] = None,
         estado: Optional[str] = None,
+        fecha_del_proyecto: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Actualiza los campos de un proyecto existente."""
         fields = []
@@ -104,6 +106,9 @@ class ProyectoRepository:
         if nombre is not None:
             fields.append("nombre = %s")
             params.append(nombre)
+        if cliente is not None:
+            fields.append("cliente = %s")
+            params.append(cliente)
         if descripcion is not None:
             fields.append("descripcion = %s")
             params.append(descripcion)
@@ -122,12 +127,18 @@ class ProyectoRepository:
         if estado is not None:
             fields.append("estado = %s")
             params.append(estado)
+        if fecha_del_proyecto is not None:
+            fields.append("fecha_del_proyecto = %s")
+            params.append(fecha_del_proyecto)
 
         if not fields:
             return ProyectoRepository.get_proyecto_by_id(id_proyecto)
 
         fields.append("fecha_actualizacion = NOW()")
         params.append(id_proyecto)
-        query = f"UPDATE proyecto SET {', '.join(fields)} WHERE id = %s RETURNING *;"
+        # PK real de la tabla es id_proyecto (mismo nombre usado en
+        # get_proyecto_by_id / get_ubicacion_by_proyecto_id), no "id".
+        query = f"UPDATE proyecto SET {', '.join(fields)} WHERE id_proyecto = %s RETURNING *;"
         res = execute_query(query, tuple(params), fetch=True)
-        return res if res else None
+        raw = res[0] if isinstance(res, list) and res else (res if res else None)
+        return raw

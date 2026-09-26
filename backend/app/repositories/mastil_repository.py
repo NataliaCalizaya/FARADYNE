@@ -121,7 +121,7 @@ class MastilRepository:
             JOIN modelo2d m2d ON m.id_modelo2d = m2d.id_modelo2d
             JOIN plano p ON m2d.id_plano = p.id_plano
             WHERE p.id_proyecto = %s
-            ORDER BY m.fecha_creacion ASC;
+            ORDER BY m.id_mastil ASC;
         """
         res = fetch_all(query, (id_proyecto,))
         return [_map_mastil_row(r) for r in res] if res else []
@@ -134,7 +134,7 @@ class MastilRepository:
             FROM mastil m
             JOIN modelo3d m3d ON m.id_modelo2d = m3d.id_modelo2d
             WHERE m3d.id_modelo3d = %s
-            ORDER BY m.fecha_creacion ASC;
+            ORDER BY m.id_mastil ASC;
         """
         res = fetch_all(query, (id_modelo3d,))
         return [_map_mastil_row(r) for r in res] if res else []
@@ -142,6 +142,6 @@ class MastilRepository:
     @staticmethod
     def get_mastiles_by_modelo2d_id(id_modelo2d: str) -> List[Dict[str, Any]]:
         """Obtiene los mástiles asociados directamente a un modelo 2D mediante la FK id_modelo2d."""
-        query = "SELECT * FROM mastil WHERE id_modelo2d = %s ORDER BY fecha_creacion ASC;"
+        query = "SELECT * FROM mastil WHERE id_modelo2d = %s ORDER BY id_mastil ASC;"
         res = fetch_all(query, (id_modelo2d,))
         return [_map_mastil_row(r) for r in res] if res else []

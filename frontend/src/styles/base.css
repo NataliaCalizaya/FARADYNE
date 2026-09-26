@@ -1,0 +1,108 @@
+/* ============================================================
+   base.css  –  Reset, body, tipografía y utilidades globales
+   ============================================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Barlow', sans-serif;
+    color: #1a1a1a;
+    min-height: 100vh;
+    background-color: #f1f5f9;
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-attachment: fixed;
+    overflow-x: hidden;
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+  }
+
+  /* Luz ambiental superior */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -8rem;
+    left: -8rem;
+    width: 36rem;
+    height: 36rem;
+    background: radial-gradient(circle, rgba(26, 109, 186, 0.35) 0%, rgba(26, 109, 186, 0) 70%);
+    border-radius: 50%;
+    filter: blur(50px);
+    pointer-events: none;
+    z-index: 0;
+    animation: pulseObstaculo 5s ease-in-out infinite;
+  }
+
+  /* Luz ambiental inferior */
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -8rem;
+    right: -8rem;
+    width: 38rem;
+    height: 38rem;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.4) 0%, rgba(56, 189, 248, 0) 70%);
+    border-radius: 50%;
+    filter: blur(50px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-condensed {
+    font-family: 'Barlow Condensed', sans-serif;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Oculta scrollbar manteniendo scroll funcional (e.g. stepper mobile) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Reduced motion: desactiva todas las animaciones decorativas */
+@media (prefers-reduced-motion: reduce) {
+  .bolt-draw-icon,
+  .ground-flow,
+  .workflow-title::before,
+  .project-data-card::before,
+  .login-ambient-glow {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}

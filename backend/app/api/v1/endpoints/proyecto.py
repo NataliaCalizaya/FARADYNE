@@ -92,7 +92,7 @@ def obtener_ubicacion_proyecto(id_proyecto: str):
     return {
         "id_proyecto": str(proyecto.get("id_proyecto", id_proyecto)),
         "nombre": proyecto.get("nombre", ""),
-        "ubicacion": proyecto.get("ubicacion"),
+        "localidad": proyecto.get("localidad"),
     }
 
 # ------------------------------------------------------------------ #

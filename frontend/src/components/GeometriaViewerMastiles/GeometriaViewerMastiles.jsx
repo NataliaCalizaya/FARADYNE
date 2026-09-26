@@ -254,16 +254,16 @@ export const GeometriaViewerMastiles = ({
   const T = getTransform();
 
   const transformPoint = (x, y) => [
-    -y * T.scale + T.offsetX,
-    -x * T.scale + T.offsetY,
+    y * T.scale + T.offsetX,
+    x * T.scale + T.offsetY,
   ];
 
   const inverseTransformPoint = (screenX, screenY) => {
     const x = (screenX - T.offsetX) / T.scale;
     const y = (screenY - T.offsetY) / T.scale;
     return [
-      -y,
-      -x,
+      y,
+      x,
     ];
   };
 

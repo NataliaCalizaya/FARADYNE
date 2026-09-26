@@ -1,0 +1,46 @@
+/* ============================================================
+   layout.css  –  Fondos de la app, header y hero
+   ============================================================ */
+
+/* Fondo general del workspace (flujo de proyecto) */
+.app-workspace {
+  background-color: #eaf2f8;
+  background-image:
+    radial-gradient(ellipse 38rem 34rem at -8% 48%, rgba(56, 189, 248, 0.42) 0%, rgba(125, 211, 252, 0.22) 38%, transparent 72%),
+    linear-gradient(rgba(241, 245, 249, 0.56), rgba(241, 245, 249, 0.72)),
+    url('/fondoFaradyne.jpg');
+  background-position: left center, center, center -2rem;
+  background-size: auto, auto, cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* El header y el selector de pasos conservan prioridad visual sobre el fondo */
+.app-workspace > * {
+  position: relative;
+}
+
+.app-workspace main {
+  position: relative;
+}
+
+.app-workspace main::before,
+.app-workspace main::after {
+  content: none;
+}
+
+/* Fondo de cuadrícula técnica: header de la aplicación */
+.header-grid-bg {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* Fondo de cuadrícula técnica: pantalla de login (más marcada) */
+.hero-grid-bg {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 34px 34px;
+}

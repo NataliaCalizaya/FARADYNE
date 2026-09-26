@@ -1,0 +1,195 @@
+/* ============================================================
+   animations.css  –  @keyframes y clases de animación
+   ============================================================ */
+
+/* ── Obstáculo / pulse general ───────────────────────────── */
+@keyframes pulseObstaculo {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-pulse-obstaculo {
+  animation: pulseObstaculo 1.6s ease-in-out infinite;
+}
+
+/* ── Título del workflow ─────────────────────────────────── */
+@keyframes projectTitlePulse {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scaleY(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+/* ── Barra superior de la tarjeta de datos ───────────────── */
+@keyframes projectElectricFlow {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ── Transición entre pasos ─────────────────────────────── */
+@keyframes stepSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.step-transition {
+  animation: stepSlideIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Login: luces de ambiente ────────────────────────────── */
+@keyframes loginAmbientDrift {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: translate3d(0, 0, 0) scale(0.92);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translate3d(1.5rem, -1rem, 0) scale(1.08);
+  }
+}
+
+/* ── Login: entrada de texto ─────────────────────────────── */
+@keyframes loginTextEnter {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Login: diagrama flotante ────────────────────────────── */
+@keyframes loginDiagramFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0.35rem, 0, 0);
+  }
+}
+
+/* ── Login: movimiento sutil del mensaje ─────────────────── */
+@keyframes loginTextFloat {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translate3d(0.25rem, -0.35rem, 0);
+  }
+}
+
+@keyframes loginMessageSway {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0.25rem, -0.2rem, 0);
+  }
+}
+
+/* ── Rayo SVG del hero ───────────────────────────────────── */
+@keyframes boltDrawIcon {
+  0% {
+    stroke-dashoffset: 66;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes boltGlowPulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0px rgba(61, 148, 224, 0.5));
+  }
+  50% {
+    filter: drop-shadow(0 0 7px rgba(61, 148, 224, 0.85));
+  }
+}
+
+.bolt-draw-icon {
+  stroke-dasharray: 66;
+  stroke-dashoffset: 66;
+  animation:
+    boltDrawIcon 1s cubic-bezier(0.22, 1, 0.36, 1) 0.3s forwards,
+    boltGlowPulse 2.6s ease-in-out 1.4s infinite;
+}
+
+/* ── Conductor de puesta a tierra ────────────────────────── */
+@keyframes groundFlow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+
+.ground-flow {
+  stroke-dasharray: 5 9;
+  animation: groundFlow 2.2s linear infinite;
+}
+
+/* ── Ícono del header ────────────────────────────────────── */
+@keyframes iconPulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0px rgba(26, 109, 186, 0.6));
+  }
+  50% {
+    filter: drop-shadow(0 0 6px rgba(26, 109, 186, 0.9));
+  }
+}
+
+.icon-pulse {
+  animation: iconPulse 2.2s ease-in-out infinite;
+}
+
+/* ── Stepper: barra de progreso ──────────────────────────── */
+.stepper-progress-fill {
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes progressGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(26, 109, 186, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(26, 109, 186, 0.8);
+  }
+}
+
+.stepper-active-glow {
+  animation: progressGlow 1.8s ease-in-out infinite;
+}

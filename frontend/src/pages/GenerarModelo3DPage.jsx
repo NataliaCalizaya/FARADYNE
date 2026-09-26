@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Box, AlertCircle, CheckCircle2, ArrowRight, Loader2, Info } from 'lucide-react';
+import { Box, AlertCircle, CheckCircle2, ArrowRight, ArrowLeft, Loader2, Info } from 'lucide-react';
 import { Modelo3DViewer } from '../components/Modelo3DViewer/Modelo3DViewer';
 import { modelos3dApi } from '../api/modelos3d';
 
-export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onModelo3DGenerated, onNext }) => {
+export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onNext, onBack, onModelo3DGenerated }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modelo3dData, setModelo3dData] = useState(null);
@@ -74,7 +74,14 @@ export const GenerarModelo3DPage = ({ idModelo2D, idModelo3D, onModelo3DGenerate
             <Modelo3DViewer idModelo3D={modelo3dData?.id || idModelo3D} idModelo2D={idModelo2D} />
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-between pt-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-5 py-2 border border-slate-300 hover:border-brand-blue text-slate-600 hover:text-brand-blue font-bold rounded text-xs flex items-center gap-1.5 transition shadow-sm bg-white"
+            >
+              <ArrowLeft className="w-4 h-4" /> Volver a Cargar y Validar Plano
+            </button>
             <button
               type="button"
               onClick={onNext}
