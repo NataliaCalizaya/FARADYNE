@@ -84,6 +84,10 @@ export const mastilesApi = {
     const response = await apiClient.get(`/cobertura/proyecto/${idProyecto}`);
     return response.data;
   },
+  guardarCobertura: async (idProyecto) => {
+  const { data } = await apiClient.post(`/cobertura/proyecto/${idProyecto}/guardar`);
+  return data;
+},
 };
 
 export default mastilesApi;

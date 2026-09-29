@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Info, MapPin, Box, Loader2, AlertTriangle } from 'lucide-react';
+   import React, { useState, useEffect, useCallback, useRef } from 'react';
+   import { Info, MapPin, Box, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 import { GeometriaViewerMastiles } from '../components/GeometriaViewerMastiles/GeometriaViewerMastiles';
 import { MastilPositioner } from '../components/MastilPositioner/MastilPositioner';
@@ -57,7 +57,8 @@ export const UbicacionMastiles = ({
 
   // ── Efectivo idModelo2D (puede venir como prop o resolverse desde idPlano) ──
   const [resolvedModelo2DId, setResolvedModelo2DId] = useState(idModelo2D || null);
-
+  const [coverageLoading, setCoverageLoading] = useState(false);
+ const [confirming, setConfirming] = useState(false);
 
   // ── Carga inicial ────────────────────────────────────────────────
 
@@ -146,16 +147,19 @@ export const UbicacionMastiles = ({
 
   const coverageReq = useRef(0);
 
-  const loadCoverage = useCallback(async () => {
-    if (!idProyecto) return;
-      const id = ++coverageReq.current;
-    try {
-      const data = await mastilesApi.getCobertura(idProyecto);
-        if (id === coverageReq.current) setCoverageData(data);
-    } catch (err) {
-      console.warn('[UbicacionMastiles] No se pudo cargar cobertura:', err);
-    }
-  }, [idProyecto]);
+   const loadCoverage = useCallback(async () => {
+     if (!idProyecto) return;
+     const id = ++coverageReq.current;
+     setCoverageLoading(true);
+     try {
+       const data = await mastilesApi.getCobertura(idProyecto);
+       if (id === coverageReq.current) setCoverageData(data);
+     } catch (err) {
+       console.warn('[UbicacionMastiles] No se pudo cargar cobertura:', err);
+     } finally {
+       if (id === coverageReq.current) setCoverageLoading(false);
+     }
+   }, [idProyecto]);
 
   // Inicialización completa
   useEffect(() => {
@@ -307,7 +311,21 @@ export const UbicacionMastiles = ({
   const handleSelectMast = (mast) => {
     setSelectedMastId(mast ? mast.id : null);
   };
-
+  const handleConfirmarUbicacion = async () => {
+    if (!idProyecto) return onNext?.();
+    setConfirming(true);
+    setError(null);
+    try {
+      const data = await mastilesApi.guardarCobertura(idProyecto);
+      setCoverageData(data);
+      onNext?.();
+    } catch (err) {
+     const detail = err?.response?.data?.detail;
+     setError(typeof detail === 'string' ? detail : 'No se pudo guardar el resultado de cobertura.');
+    } finally {
+     setConfirming(false);
+    }
+   };
   // Cancelar con Escape
   useEffect(() => {
     const onKey = (e) => {
@@ -420,6 +438,9 @@ export const UbicacionMastiles = ({
               {coverageData?.porcentaje_cobertura != null
                 ? `${coverageData.porcentaje_cobertura}%`
                 : masts.length > 0 ? '—' : '0%'}
+                {(coverageData.advertencias || []).map((a, i) => (
+                  <p key={i} className="text-[11px] text-amber-700 border-t border-gray-200 pt-2">{a}</p>
+                ))}
             </div>
           </div>
         </div>
@@ -442,6 +463,11 @@ export const UbicacionMastiles = ({
               {label}
             </button>
           ))}
+            <button type="button" onClick={loadCoverage} disabled={coverageLoading}
+            className="px-3 py-1.5 border border-slate-300 hover:bg-slate-100 rounded text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
+            <RefreshCw className={`w-3.5 h-3.5 ${coverageLoading ? 'animate-spin' : ''}`} />
+            Actualizar cobertura
+          </button>
         </div>
       </div>
 
@@ -531,10 +557,10 @@ export const UbicacionMastiles = ({
       </div>
       <button
         type="button"
-        onClick={onNext}
+        onClick={handleConfirmarUbicacion}disabled={confirming}
         className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs transition flex items-center justify-center gap-2"
       >
-        <Box className="w-4 h-4" />
+        {confirming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Box className="w-4 h-4" />}
         Confirmar Ubicación → Continuar
       </button>
     </div>

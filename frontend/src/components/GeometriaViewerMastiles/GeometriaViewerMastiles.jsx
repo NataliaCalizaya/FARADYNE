@@ -52,7 +52,7 @@ import {
 } from 'lucide-react';
 
 import { planosApi } from '../../api/planos';
-import { getMastColor } from '../../api/utilsMastilVisual';
+import { getMastColor } from '../../hooks/utilsMastilVisual';
 
 
 // ============================================================

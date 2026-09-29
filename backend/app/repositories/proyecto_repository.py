@@ -9,6 +9,89 @@ class ProyectoRepository:
         """Fetch de la fila completa de 'proyecto' por su PK real (id_proyecto)."""
         query = "SELECT * FROM proyecto WHERE id_proyecto = %s;"
         return fetch_one(query, (id_proyecto,))
+
+    @staticmethod
+    def get_proyecto_completo_by_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
+        """Fetch proyecto con IDs derivados resueltos via LEFT JOINs.
+
+        Devuelve id_plano, id_modelo2d, id_modelo3d y geometria_validada
+        para que el frontend pueda reconstruir el estado al abrir una URL
+        directa (F5 o enlace compartido). LEFT JOIN permite proyectos parciales.
+        """
+        query = """
+            SELECT
+                p.id_proyecto,
+                p.nombre,
+                p.cliente,
+                p.descripcion,
+                p.ubicacion,
+                p.departamento,
+                p.provincia,
+                p.localidad,
+                p.estado,
+                p.fecha_creacion,
+                p.fecha_del_proyecto,
+                pl.id_plano,
+                m2d.id_modelo2d,
+                COALESCE(m2d.validado, FALSE) AS geometria_validada,
+                m3d.id_modelo3d
+            FROM proyecto p
+            LEFT JOIN plano pl
+                ON pl.id_proyecto = p.id_proyecto
+            LEFT JOIN modelo2d m2d
+                ON m2d.id_plano = pl.id_plano
+            LEFT JOIN modelo3d m3d
+                ON m3d.id_modelo2d = m2d.id_modelo2d
+            WHERE p.id_proyecto = %s
+            ORDER BY pl.id_plano        DESC NULLS LAST,
+                     m2d.id_modelo2d   DESC NULLS LAST,
+                     m3d.id_modelo3d   DESC NULLS LAST
+            LIMIT 1;
+        """
+        return fetch_one(query, (id_proyecto,))
+
+
+
+    @staticmethod
+    def get_proyecto_completo_by_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
+        """Fetch proyecto con IDs derivados (id_plano, id_modelo2d, id_modelo3d,
+        geometria_validada) resueltos mediante LEFT JOINs.
+
+        Usado por el frontend para reconstruir el estado completo al abrir una
+        URL directa (ej. /proyecto/<uuid>/mastiles tras F5 o link compartido).
+        Usa LEFT JOIN para que funcione con proyectos parciales (sin plano, etc.).
+        """
+        query = """
+            SELECT
+                p.id_proyecto,
+                p.nombre,
+                p.cliente,
+                p.descripcion,
+                p.ubicacion,
+                p.departamento,
+                p.provincia,
+                p.localidad,
+                p.estado,
+                p.fecha_creacion,
+                p.fecha_del_proyecto,
+                pl.id_plano,
+                m2d.id_modelo2d,
+                COALESCE(m2d.validado, FALSE) AS geometria_validada,
+                m3d.id_modelo3d
+            FROM proyecto p
+            LEFT JOIN plano pl
+                ON pl.id_proyecto = p.id_proyecto
+            LEFT JOIN modelo2d m2d
+                ON m2d.id_plano = pl.id_plano
+            LEFT JOIN modelo3d m3d
+                ON m3d.id_modelo2d = m2d.id_modelo2d
+            WHERE p.id_proyecto = %s
+            ORDER BY pl.id_plano DESC NULLS LAST,
+                     m2d.id_modelo2d DESC NULLS LAST,
+                     m3d.id_modelo3d DESC NULLS LAST
+            LIMIT 1;
+        """
+        return fetch_one(query, (id_proyecto,))
  
     @staticmethod
     def get_ubicacion_by_proyecto_id(id_proyecto: str) -> Optional[Dict[str, Any]]:

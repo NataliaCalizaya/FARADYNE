@@ -29,6 +29,17 @@ export const proyectosApi = {
   },
 
   /**
+   * Obtiene el proyecto con IDs derivados resueltos (id_plano, id_modelo2d,
+   * id_modelo3d, geometria_validada) para reconstruir el estado al abrir
+   * una URL directa (F5 o enlace compartido con colaboradores).
+   * @param {string} idProyecto - UUID del proyecto
+   */
+  getProyectoCompleto: async (idProyecto) => {
+    const response = await apiClient.get(`/proyectos/${idProyecto}/completo`);
+    return response.data;
+  },
+
+  /**
    * Actualiza los datos de un proyecto existente.
    * @param {string} idProyecto - UUID del proyecto
    * @param {Object} payload - campos a actualizar

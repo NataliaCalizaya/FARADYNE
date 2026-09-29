@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.repositories.proyecto_repository import ProyectoRepository
-from app.schemas.proyecto_schema import ProyectoUbicacionResponse
+from app.schemas.proyecto_schema import ProyectoCompletoResponse, ProyectoUbicacionResponse
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -93,6 +93,34 @@ def obtener_ubicacion_proyecto(id_proyecto: str):
         "id_proyecto": str(proyecto.get("id_proyecto", id_proyecto)),
         "nombre": proyecto.get("nombre", ""),
         "localidad": proyecto.get("localidad"),
+    }
+
+
+@router.get("/{id_proyecto}/completo", response_model=ProyectoCompletoResponse)
+def obtener_proyecto_completo(id_proyecto: str) -> Dict[str, Any]:
+    """Devuelve el proyecto con IDs derivados (id_plano, id_modelo2d,
+    id_modelo3d, geometria_validada) para reconstruir el estado del
+    frontend al abrir una URL directa. 404 si el proyecto no existe.
+    """
+    row = ProyectoRepository.get_proyecto_completo_by_id(id_proyecto)
+    if not row:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado.")
+    return {
+        "id_proyecto": str(row["id_proyecto"]),
+        "nombre": row.get("nombre", ""),
+        "cliente": row.get("cliente"),
+        "descripcion": row.get("descripcion"),
+        "ubicacion": row.get("ubicacion"),
+        "departamento": row.get("departamento"),
+        "provincia": row.get("provincia"),
+        "localidad": row.get("localidad"),
+        "estado": row.get("estado", "borrador"),
+        "fecha_creacion": row.get("fecha_creacion"),
+        "fecha_del_proyecto": row.get("fecha_del_proyecto"),
+        "id_plano": str(row["id_plano"]) if row.get("id_plano") else None,
+        "id_modelo2d": str(row["id_modelo2d"]) if row.get("id_modelo2d") else None,
+        "id_modelo3d": str(row["id_modelo3d"]) if row.get("id_modelo3d") else None,
+        "geometria_validada": bool(row.get("geometria_validada", False)),
     }
 
 # ------------------------------------------------------------------ #

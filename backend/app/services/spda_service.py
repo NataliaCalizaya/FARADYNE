@@ -375,9 +375,14 @@ def _construir_superficies(
 
 def _regiones_de_cubierta(
     poligonos: Optional[List[Dict[str, Any]]], building_dim: Dict[str, Any]
-) -> List[Tuple[Polygon, Callable[[float, float], float]]]:
-    regiones: List[Tuple[Polygon, Callable[[float, float], float]]] = []
-    for region in poligonos or []:
+) -> List[Tuple[Polygon, Callable[[float, float], float], str]]:
+    """Regiones (prismas) de la cubierta: (polígono, función z(x, y), id_prisma).
+
+    El id es el `id` del polígono del Modelo2D, el mismo que llevan los prismas
+    del Modelo3D (`prisms[].id`).
+    """
+    regiones: List[Tuple[Polygon, Callable[[float, float], float], str]] = []
+    for i, region in enumerate(poligonos or [], start=1):
         try:
             footprint = normalize_footprint(region)
             if len(footprint) < 3:
@@ -388,9 +393,10 @@ def _regiones_de_cubierta(
             if poly.is_empty or poly.area < 1e-6:
                 continue
             z_fn, _, _ = top_plane(prepare_region_levels(region))
+            rid = str(region.get("id") or f"region_{i}")
             partes = list(poly.geoms) if poly.geom_type == "MultiPolygon" else [poly]
             for p in partes:
-                regiones.append((p, z_fn))
+                regiones.append((p, z_fn, rid))
         except (ValueError, TypeError):
             continue
 
@@ -399,19 +405,19 @@ def _regiones_de_cubierta(
         largo = float(building_dim.get("longitud", 20.0))
         ancho = float(building_dim.get("anchura", 15.0))
         alto = float(building_dim.get("altura", 7.5))
-        regiones.append((box(0.0, 0.0, largo, ancho), lambda x, y, z=alto: z))
+        regiones.append((box(0.0, 0.0, largo, ancho), lambda x, y, z=alto: z, "cubierta"))
     return regiones
 
 
 def _muestrear_cubierta(
-    regiones: List[Tuple[Polygon, Callable[[float, float], float]]], paso: float
+    regiones: List[Tuple[Polygon, Callable[[float, float], float], str]], paso: float
 ) -> Tuple[List[Dict[str, Any]], float]:
     """Divide cada región en celdas de `paso` m; cada celda es una muestra."""
-    area_total = sum(p.area for p, _ in regiones)
+    area_total = sum(r[0].area for r in regiones)
     paso = max(paso, math.sqrt(area_total / MAX_MUESTRAS)) if area_total > 0 else paso
 
     muestras: List[Dict[str, Any]] = []
-    for r_idx, (poly, z_fn) in enumerate(regiones):
+    for r_idx, (poly, z_fn, _rid) in enumerate(regiones):
         minx, miny, maxx, maxy = poly.bounds
         nx = max(1, math.ceil((maxx - minx) / paso))
         ny = max(1, math.ceil((maxy - miny) / paso))
@@ -520,6 +526,9 @@ class SPDAService:
         area_total = 0.0
         area_protegida = 0.0
         piezas_libres: Dict[Tuple[int, str], List[Any]] = defaultdict(list)
+        por_prisma: Dict[str, Dict[str, float]] = {}
+        for _poly, _fn, rid in regiones:
+            por_prisma.setdefault(rid, {"area": 0.0, "prot": 0.0})
 
         puntas_xy = [(float(m.get("posicion_x", 0.0)), float(m.get("posicion_y", 0.0)), str(m.get("id", ""))) for m in masts]
 
@@ -527,6 +536,8 @@ class SPDAService:
             protegido, motivo, sid = _evaluar_muestra(m, evaluables)
             area = m["pieza"].area
             area_total += area
+            acum = por_prisma[regiones[m["region"]][2]]
+            acum["area"] += area
 
             dist_min, mastil_cercano = float("inf"), None
             for mx, my, mid in puntas_xy:
@@ -546,6 +557,7 @@ class SPDAService:
             }
             if protegido:
                 area_protegida += area
+                acum["prot"] += area
                 puntos_cobertura.append(item)
             else:
                 puntos_desprotegidos.append(item)
@@ -563,6 +575,7 @@ class SPDAService:
                 parte = parte.simplify(0.01, preserve_topology=True)
                 c = parte.representative_point() if not parte.contains(parte.centroid) else parte.centroid
                 zonas.append({
+                    "id_prisma": regiones[r_idx][2],
                     "motivo": motivo,
                     "mensaje": MENSAJES_MOTIVO.get(motivo, ""),
                     "area_m2": round(parte.area, 2),
@@ -575,6 +588,24 @@ class SPDAService:
             z["id"] = f"Z{i}"
 
         porcentaje = round(area_protegida / area_total * 100.0, 2) if area_total > 0 else 0.0
+
+        prismas: List[Dict[str, Any]] = []
+        for rid, a in por_prisma.items():
+            if a["area"] <= 0:
+                continue
+            if a["prot"] >= a["area"] - 1e-6:
+                estado = "protegido"
+            elif a["prot"] <= 1e-9:
+                estado = "desprotegido"
+            else:
+                estado = "parcial"
+            prismas.append({
+                "id": rid,
+                "area_m2": round(a["area"], 2),
+                "area_protegida_m2": round(a["prot"], 2),
+                "porcentaje_cobertura": round(a["prot"] / a["area"] * 100.0, 2),
+                "estado": estado,
+            })
 
         advertencias: List[str] = []
         if not masts:
@@ -600,6 +631,7 @@ class SPDAService:
             "superficies_esfera": superficies,
             "triangulos_sin_esfera": sin_esfera,
             "zonas_desprotegidas": zonas,
+            "prismas": prismas,
             "puntos_cobertura": puntos_cobertura,
             "puntos_desprotegidos": puntos_desprotegidos,
             "porcentaje_cobertura": porcentaje,
@@ -608,3 +640,52 @@ class SPDAService:
             "paso_malla_m": round(paso_usado, 3),
             "advertencias": advertencias,
         }
+
+    @staticmethod
+    def resumen_para_persistencia(
+        evaluacion: Dict[str, Any], incluir_malla: bool = False
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Arma (zonas_protegidas, zonas_vulnerables, mallas_cobertura) para `resultado_simulacion`.
+
+        - zonas_protegidas: prismas cubiertos al 100 %.
+        - zonas_vulnerables: prismas con alguna parte sin cobertura, con sus
+          zonas (polígonos 3D) y el motivo de cada una.
+        - mallas_cobertura: esferas por terna (y ternas sin esfera posible).
+          Por defecto sin vértices/triángulos (se regeneran con centro y radio);
+          `incluir_malla=True` los guarda también.
+        """
+        zonas_por_prisma: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for z in evaluacion.get("zonas_desprotegidas", []):
+            zonas_por_prisma[z.get("id_prisma")].append(
+                {k: z.get(k) for k in ("id", "motivo", "area_m2", "centroide", "poligono", "huecos")}
+            )
+
+        protegidas: List[Dict[str, Any]] = []
+        vulnerables: List[Dict[str, Any]] = []
+        for p in evaluacion.get("prismas", []):
+            if p["estado"] == "protegido":
+                protegidas.append({
+                    "id_prisma": p["id"],
+                    "area_m2": p["area_m2"],
+                    "porcentaje_cobertura": p["porcentaje_cobertura"],
+                })
+            else:
+                vulnerables.append({
+                    "id_prisma": p["id"],
+                    "estado": p["estado"],
+                    "area_m2": p["area_m2"],
+                    "area_desprotegida_m2": round(p["area_m2"] - p["area_protegida_m2"], 2),
+                    "porcentaje_cobertura": p["porcentaje_cobertura"],
+                    "zonas": zonas_por_prisma.get(p["id"], []),
+                })
+
+        mallas: List[Dict[str, Any]] = []
+        for s in evaluacion.get("superficies_esfera", []):
+            item = {"tipo": "esfera", **{k: v for k, v in s.items() if k not in ("vertices", "triangulos")}}
+            if incluir_malla:
+                item["vertices"], item["triangulos"] = s.get("vertices", []), s.get("triangulos", [])
+            mallas.append(item)
+        for t in evaluacion.get("triangulos_sin_esfera", []):
+            mallas.append({"tipo": "terna_sin_esfera", **t})
+
+        return protegidas, vulnerables, mallas

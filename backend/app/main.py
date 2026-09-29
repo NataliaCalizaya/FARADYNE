@@ -25,10 +25,19 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS Configuration
+# CORS Configuration — acepta cualquier origen localhost/127.0.0.1 (dev)
+ALLOWED_ORIGINS = [
+    "http://localhost:1232",
+    "http://127.0.0.1:1232",
+    "http://localhost:1233",
+    "http://127.0.0.1:1233",
+    "http://localhost:5173",   # Vite default por si acaso
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:1232","http://127.0.0.1:1232"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
