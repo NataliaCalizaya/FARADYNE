@@ -81,7 +81,7 @@ export const mastilesApi = {
    * @param {string} idProyecto
    */
   getCobertura: async (idProyecto) => {
-    const response = await apiClient.get(`/mastiles/proyecto/${idProyecto}/cobertura`);
+    const response = await apiClient.get(`/cobertura/proyecto/${idProyecto}`);
     return response.data;
   },
 };

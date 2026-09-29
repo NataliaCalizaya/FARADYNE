@@ -2,7 +2,7 @@
 venv/ 
 env/ 
 .venv/ 
-
+config.md
 # Variables de entorno (credenciales reales - NUNCA subir) 
 .env 
 

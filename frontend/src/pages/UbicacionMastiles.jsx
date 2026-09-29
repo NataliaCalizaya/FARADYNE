@@ -7,7 +7,7 @@ import { Modelo3DViewer } from '../components/Modelo3DViewer/Modelo3DViewer';
 import { planosApi } from '../api/planos';
 import { mastilesApi } from '../api/mastiles';
 import { modelos3dApi } from '../api/modelos3d';
-import { getMastColor } from '../api/utilsMastilVisual';
+import { getMastColor } from '../hooks/utilsMastilVisual';
 
 /**
  * UbicacionMastiles (HU05 + HU03)
@@ -144,11 +144,14 @@ export const UbicacionMastiles = ({
     }
   }, []);
 
+  const coverageReq = useRef(0);
+
   const loadCoverage = useCallback(async () => {
     if (!idProyecto) return;
+      const id = ++coverageReq.current;
     try {
       const data = await mastilesApi.getCobertura(idProyecto);
-      setCoverageData(data);
+        if (id === coverageReq.current) setCoverageData(data);
     } catch (err) {
       console.warn('[UbicacionMastiles] No se pudo cargar cobertura:', err);
     }
@@ -503,6 +506,7 @@ export const UbicacionMastiles = ({
                 idModelo3D={idModelo3D}
                 idModelo2D={resolvedModelo2DId}
                 masts={masts}
+                coverageData={coverageData}
               />
             </div>
           )}

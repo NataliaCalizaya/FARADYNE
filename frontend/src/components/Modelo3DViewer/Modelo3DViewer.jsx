@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three-stdlib';
 import { RefreshCw, Box, Eye, Loader2 } from 'lucide-react';
 import { modelos3dApi } from '../../api/modelos3d';
-import { getMastColor } from '../../api/utilsMastilVisual'
+import { getMastColor } from '../../hooks/utilsMastilVisual';
+import { buildCoberturaGroup, disposeGroup } from '../../hooks/coberturaSPDALayer';
 /**
  * FARADYNE Model Convention:
  * El Backend Python envía: [x, y, z] donde Z es la altura.
@@ -45,7 +46,7 @@ function addPrismToScene(scene, prism) {
     roughness: 0.65,
     metalness: 0.1,
   });
-  
+
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = prism.id || 'roof_region';
   scene.add(mesh);
@@ -64,7 +65,7 @@ function addLabelToScene(scene, x, y, z, text) {
   cv.height = 54;
   const ctx = cv.getContext('2d');
   if (!ctx) return;
-  
+
   ctx.fillStyle = 'rgba(255,255,255,.92)';
   ctx.fillRect(0, 0, cv.width, cv.height);
   ctx.fillStyle = '#0f172a';
@@ -83,12 +84,16 @@ function addLabelToScene(scene, x, y, z, text) {
   scene.add(sprite);
 }
 
-export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
+export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [], coverageData = null }) => {
   const mountRef = useRef(null);
   const controlsRef = useRef(null);
   const cameraRef = useRef(null);
   const targetRef = useRef(new THREE.Vector3(0, 3, 0));
   const initialCamPosRef = useRef(new THREE.Vector3(50, 40, 50));
+  //de cobertura 
+  const sceneRef = useRef(null);
+  const [showSuperficies, setShowSuperficies] = useState(true);
+  const [showZonas, setShowZonas] = useState(true);
 
   const [loading, setLoading] = useState(false);
   const [model3dData, setModel3dData] = useState(null);
@@ -104,8 +109,8 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
   const generate3DModel = async (id2d) => {
     setLoading(true);
     try {
-      const data = await modelos3dApi.generateModelo3D({ 
-        id_modelo2d: id2d 
+      const data = await modelos3dApi.generateModelo3D({
+        id_modelo2d: id2d
       });
       setModel3dData(data);
     } catch (err) {
@@ -132,6 +137,7 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
     if (!el || !model3dData) return;
 
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     scene.background = new THREE.Color(0x0f172a);
 
     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 5000);
@@ -146,7 +152,7 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
     scene.add(new THREE.DirectionalLight(0xffffff, 1.2));
 
     const meta = model3dData.geometria_volumetrica || {};
-    
+
     // AHORA LEE DIRECTAMENTE LOS PRISMAS GENERADOS POR PYTHON
     const prisms = meta.prisms || [];
     prisms.forEach((prism) => addPrismToScene(scene, prism));
@@ -178,13 +184,13 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
 
     // Cámara y Grilla
     const vista = meta.vista_defecto || model3dData.vista_defecto || {};
-    
+
     if (vista.camera && vista.target) {
-        initialCamPosRef.current.set(vista.camera[0], vista.camera[1], vista.camera[2]);
-        targetRef.current.set(vista.target[0], vista.target[1], vista.target[2]);
+      initialCamPosRef.current.set(vista.camera[0], vista.camera[1], vista.camera[2]);
+      targetRef.current.set(vista.target[0], vista.target[1], vista.target[2]);
     } else {
-        initialCamPosRef.current.set(50, 40, 50);
-        targetRef.current.set(0, 3, 0);
+      initialCamPosRef.current.set(50, 40, 50);
+      targetRef.current.set(0, 3, 0);
     }
 
     // Dibujar grilla basada en Bounding Box del backend
@@ -198,32 +204,32 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
 
     // Mástiles
     masts.forEach((mast) => {
-    const mx = mast.posicion_x || 0;
-    const my = mast.posicion_y || 0;
-    const mz = mast.posicion_z || 0;
-    const alturaTotal = mast.altura || 1;
-    const alturaCono = Math.min(0.3, alturaTotal * 0.25);
-    const alturaCilindro = alturaTotal - alturaCono;
-    const color = getMastColor(alturaTotal);
+      const mx = mast.posicion_x || 0;
+      const my = mast.posicion_y || 0;
+      const mz = mast.posicion_z || 0;
+      const alturaTotal = mast.altura || 1;
+      const alturaCono = Math.min(0.3, alturaTotal * 0.25);
+      const alturaCilindro = alturaTotal - alturaCono;
+      const color = getMastColor(alturaTotal);
 
-    const group = new THREE.Group();
-    group.position.set(mx, mz, -my);
+      const group = new THREE.Group();
+      group.position.set(mx, mz, -my);
 
-    const poleMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.12, alturaCilindro, 16),
-      new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness: 0.2 })
-    );
-    poleMesh.position.set(0, alturaCilindro / 2, 0);
-    group.add(poleMesh);
+      const poleMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.12, alturaCilindro, 16),
+        new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness: 0.2 })
+      );
+      poleMesh.position.set(0, alturaCilindro / 2, 0);
+      group.add(poleMesh);
 
-    const tipMesh = new THREE.Mesh(
-      new THREE.ConeGeometry(0.14, alturaCono, 16),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35 })
-    );
-    tipMesh.position.set(0, alturaCilindro + alturaCono / 2, 0);
-    group.add(tipMesh);
+      const tipMesh = new THREE.Mesh(
+        new THREE.ConeGeometry(0.14, alturaCono, 16),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35 })
+      );
+      tipMesh.position.set(0, alturaCilindro + alturaCono / 2, 0);
+      group.add(tipMesh);
 
-    scene.add(group);
+      scene.add(group);
     });
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -250,6 +256,7 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      sceneRef.current = null;
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(raf);
       controls.dispose();
@@ -257,6 +264,21 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
   }, [model3dData, masts]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !coverageData) return undefined;
+    const group = buildCoberturaGroup(coverageData, {
+      superficies: showSuperficies,
+      zonas: showZonas,
+    });
+    scene.add(group);
+    return () => {
+      scene.remove(group);
+      disposeGroup(group);
+    };
+  }, [model3dData, masts, coverageData, showSuperficies, showZonas]);
+
 
   const handleResetCamera = () => {
     if (controlsRef.current && cameraRef.current) {
@@ -273,13 +295,26 @@ export const Modelo3DViewer = ({ idModelo2D, idModelo3D, masts = [] }) => {
           <Box className="w-4 h-4 text-brand-blue" />
           <span>Visor 3D (Renderizando geometría del Backend)</span>
         </div>
-        <button
-          type="button"
+        <div className="flex items-center gap-3">
+        {coverageData && (
+          <div className="flex items-center gap-3 text-[11px] text-slate-300">
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" checked={showSuperficies} onChange={(e) => setShowSuperficies(e.target.checked)} />
+              <span className="w-2 h-2 rounded-full bg-cyan-400" /> Esferas
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" checked={showZonas} onChange={(e) => setShowZonas(e.target.checked)} />
+              <span className="w-2 h-2 rounded-full bg-red-500" /> Zonas a corregir
+            </label>
+          </div>
+        )}
+          <button type="button"
           onClick={handleResetCamera}
           className="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold flex items-center gap-1.5 transition"
         >
           <RefreshCw className="w-3 h-3" /> Restablecer vista
         </button>
+        </div>
       </div>
 
       <div className="flex-1 w-full h-[380px] min-h-[300px] relative">
