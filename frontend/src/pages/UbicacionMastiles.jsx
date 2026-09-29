@@ -438,10 +438,10 @@ export const UbicacionMastiles = ({
               {coverageData?.porcentaje_cobertura != null
                 ? `${coverageData.porcentaje_cobertura}%`
                 : masts.length > 0 ? '—' : '0%'}
-                {(coverageData.advertencias || []).map((a, i) => (
-                  <p key={i} className="text-[11px] text-amber-700 border-t border-gray-200 pt-2">{a}</p>
-                ))}
             </div>
+            {(coverageData?.advertencias || []).map((a, i) => (
+              <p key={i} className="text-[11px] text-amber-700 border-t border-gray-200 pt-2">{a}</p>
+            ))}
           </div>
         </div>
 

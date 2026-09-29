@@ -109,9 +109,16 @@ export function Workspace({ onLogout }) {
 
   // ── Efecto 3: guard de pasos (solo tras cargar desde URL, no en flujo vivo) ─
   useEffect(() => {
-    if (isLoading || idParam === 'nuevo') return;
     const stepIdx = STEP_SLUGS.indexOf(paso);
     if (stepIdx < 0) { navigate('/'); return; }
+
+    if (idParam === 'nuevo') {
+      // En /nuevo solo el paso 0 (datos) es válido sin proyecto creado
+      if (stepIdx > 0) { navigate('/proyecto/nuevo/datos'); return; }
+      return;
+    }
+
+    if (isLoading) return;
     // Paso 1+ requiere que exista un plano
     if (stepIdx >= 1 && !idPlano)   { navigate(`/proyecto/${idParam}/datos`);  return; }
     // Paso 2+ requiere que exista el modelo 3D
