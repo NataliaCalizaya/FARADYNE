@@ -90,8 +90,8 @@ async def upload_plano(
         archivo -> intérprete -> Modelo 2D -> persistencia
 
     El intérprete de PDF ya devuelve los niveles asociados a un lado de un
-    polígono (cotas_altura[i]["asociaciones"]); los que no tenían polígono
-    cerca se descartan y no llegan acá.
+    polígono (cotas_altura[i]["asociaciones"]). Los que no tenían polígono
+    cerca se conservan sin asociación para su revisión manual en el visor.
     """
     filename = file.filename or "plano_sin_nombre"
     ext = os.path.splitext(filename)[1].lower()
