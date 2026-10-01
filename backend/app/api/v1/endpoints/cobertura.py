@@ -24,16 +24,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cobertura", tags=["cobertura de mastiles"])
 
-# Orden importante: "Nivel I" está contenido en "Nivel II/III".
-RADIOS_POR_NIVEL = {"Nivel IV": 60.0, "Nivel III": 45.0, "Nivel II": 30.0, "Nivel I": 20.0}
-
-
-def _radio_por_nivel(nivel_str: str) -> float:
-    for clave, radio in RADIOS_POR_NIVEL.items():
-        if clave in nivel_str:
-            return radio
-    return 20.0
-
 
 def _extraer_dimensiones_modelo3d(
     modelo3d: Dict[str, Any],
@@ -58,20 +48,39 @@ def _extraer_dimensiones_modelo3d(
 
 def _calcular_cobertura(id_proyecto: str) -> Dict[str, Any]:
     """Calcula la cobertura del proyecto. Devuelve la respuesta + `_evaluacion` (interno)."""
-    # 1. Nivel de protección (HU04) -> radio de la esfera. Fallback: Nivel I (20 m).
-    nivel_str, radio = "Nivel I", 20.0
+     # 1. Nivel de protección y radio de esfera del proyecto.
     try:
-        nivel_db = NivelProteccionRepository.get_nivel_proteccion_by_proyecto_id(id_proyecto)
-        if nivel_db:
-            nivel_str = (
-                nivel_db.get("nivel_proteccion")
-                or nivel_db.get("nivel_proteccion_recomendado")
-                or nivel_db.get("nivel")
-                or "Nivel I"
+        nivel_db = (
+            NivelProteccionRepository
+            .get_nivel_proteccion_by_proyecto_id(id_proyecto)
+        )
+
+        if not nivel_db:
+            raise ValueError(
+                f"No existe nivel de protección para el proyecto {id_proyecto}"
             )
-            radio = _radio_por_nivel(nivel_str)
+
+        nivel_str = (
+            nivel_db.get("nivel_proteccion")
+            or "Nivel I"
+        )
+
+        radio_db = nivel_db.get("radio_esfera")
+
+        if radio_db is None:
+            raise ValueError(
+                f"El proyecto {id_proyecto} no tiene radio_esfera definido"
+            )
+
+        radio = float(radio_db)
+
     except Exception:
-        logger.exception("No se pudo leer el nivel de protección del proyecto %s", id_proyecto)
+        logger.exception(
+            "No se pudo obtener el nivel de protección y radio "
+            "del proyecto %s",
+            id_proyecto
+        )
+        raise
 
     # 2. Modelo 3D (dimensiones de respaldo) + polígonos del Modelo 2D (cubierta real).
     dims = {"longitud": 20.0, "anchura": 15.0, "altura": 7.5}

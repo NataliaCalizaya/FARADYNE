@@ -176,77 +176,115 @@ def _z_casquete(esfera: Dict[str, Any], x: float, y: float) -> Optional[float]:
 # MALLAS DEL CASQUETE (para el visor 3D)
 # ============================================================
 
-def _malla_triangulo(
-    puntas: Tuple[Vec3, Vec3, Vec3], esfera: Dict[str, Any], n: int
-) -> Tuple[List[List[float]], List[List[int]]]:
-    """Casquete inferior recortado al triángulo de las 3 puntas (en planta).
+# def _malla_triangulo(
+#     puntas: Tuple[Vec3, Vec3, Vec3], esfera: Dict[str, Any], n: int
+# ) -> Tuple[List[List[float]], List[List[int]]]:
+#     """Casquete inferior recortado al triángulo de las 3 puntas (en planta).
 
-    Teselado baricéntrico del triángulo; cada vértice se lleva a la cota Z de
-    la esfera. Las 3 esquinas coinciden exactamente con las puntas y los
-    triángulos vecinos comparten arista sin solaparse (efecto "malla").
-    """
-    (x1, y1, _), (x2, y2, _), (x3, y3, _) = puntas
+#     Teselado baricéntrico del triángulo; cada vértice se lleva a la cota Z de
+#     la esfera. Las 3 esquinas coinciden exactamente con las puntas y los
+#     triángulos vecinos comparten arista sin solaparse (efecto "malla").
+#     """
+#     (x1, y1, _), (x2, y2, _), (x3, y3, _) = puntas
+#     indice: Dict[Tuple[int, int], int] = {}
+#     vertices: List[List[float]] = []
+#     for i in range(n + 1):
+#         for j in range(n + 1 - i):
+#             u, v = i / n, j / n
+#             w = 1.0 - u - v
+#             x = u * x1 + v * x2 + w * x3
+#             y = u * y1 + v * y2 + w * y3
+#             cx, cy, cz = esfera["centro"]
+#             rad = max(0.0, esfera["radio"] ** 2 - (x - cx) ** 2 - (y - cy) ** 2)
+#             z = cz - math.sqrt(rad)
+#             indice[(i, j)] = len(vertices)
+#             vertices.append([round(x, 3), round(y, 3), round(z, 3)])
+
+#     triangulos: List[List[int]] = []
+#     for i in range(n):
+#         for j in range(n - i):
+#             triangulos.append([indice[(i, j)], indice[(i + 1, j)], indice[(i, j + 1)]])
+#             if j < n - i - 1:
+#                 triangulos.append(
+#                     [indice[(i + 1, j)], indice[(i + 1, j + 1)], indice[(i, j + 1)]]
+#                 )
+#     return vertices, triangulos
+def _malla_superficie_esferica(
+    puntas: Tuple[Vec3, Vec3, Vec3],
+    esfera: Dict[str, Any],
+    n: int = 24,
+) -> Tuple[List[List[float]], List[List[int]]]:
+
+    p1, p2, p3 = puntas
+    centro = esfera["centro"]
+    radio = float(esfera["radio"])
+
+    v1 = _unit(_sub(p1, centro))
+    v2 = _unit(_sub(p2, centro))
+    v3 = _unit(_sub(p3, centro))
+
     indice: Dict[Tuple[int, int], int] = {}
     vertices: List[List[float]] = []
+    triangulos: List[List[int]] = []
+
     for i in range(n + 1):
         for j in range(n + 1 - i):
-            u, v = i / n, j / n
-            w = 1.0 - u - v
-            x = u * x1 + v * x2 + w * x3
-            y = u * y1 + v * y2 + w * y3
-            cx, cy, cz = esfera["centro"]
-            rad = max(0.0, esfera["radio"] ** 2 - (x - cx) ** 2 - (y - cy) ** 2)
-            z = cz - math.sqrt(rad)
-            indice[(i, j)] = len(vertices)
-            vertices.append([round(x, 3), round(y, 3), round(z, 3)])
 
-    triangulos: List[List[int]] = []
+            u = i / n
+            v = j / n
+            w = 1.0 - u - v
+
+            direccion = (
+                v1[0] * u + v2[0] * v + v3[0] * w,
+                v1[1] * u + v2[1] * v + v3[1] * w,
+                v1[2] * u + v2[2] * v + v3[2] * w,
+            )
+
+            direccion = _unit(direccion)
+
+            punto = _add(
+                centro,
+                _mul(direccion, radio),
+            )
+
+            indice[(i, j)] = len(vertices)
+            vertices.append(_r3(punto))
+
     for i in range(n):
         for j in range(n - i):
-            triangulos.append([indice[(i, j)], indice[(i + 1, j)], indice[(i, j + 1)]])
+
+            a = indice[(i, j)]
+            b = indice[(i + 1, j)]
+            c = indice[(i, j + 1)]
+
+            triangulos.append([a, b, c])
+
             if j < n - i - 1:
-                triangulos.append(
-                    [indice[(i + 1, j)], indice[(i + 1, j + 1)], indice[(i, j + 1)]]
-                )
+                d = indice[(i + 1, j + 1)]
+                triangulos.append([b, d, c])
+
     return vertices, triangulos
 
+    # ------------------------------------------------------------
+    # TRIANGULACIÓN
+    # ------------------------------------------------------------
 
-def _malla_casquete(
-    esfera: Dict[str, Any], n_anillos: int = 8, n_seg: int = 36
-) -> Tuple[List[List[float]], List[List[int]]]:
-    """Casquete completo: esfera cortada por el plano de las 3 puntas.
+    for i in range(n):
 
-    Se conserva la parte que queda del lado opuesto al centro (el casquete
-    menor, hacia abajo). El borde es la circunferencia que pasa por las 3
-    puntas.
-    """
-    c = esfera["centro"]
-    a = esfera["eje"]
-    r = esfera["radio"]
-    h = esfera["h"]
-    phi_max = math.acos(min(1.0, h / r))
+        for j in range(n - i):
 
-    ref = (1.0, 0.0, 0.0) if abs(a[0]) < 0.9 else (0.0, 1.0, 0.0)
-    e1 = _unit(_cross(a, ref))
-    e2 = _cross(a, e1)
+            a = indice[(i, j)]
+            b = indice[(i + 1, j)]
+            c = indice[(i, j + 1)]
 
-    vertices: List[List[float]] = [_r3(_add(c, _mul(a, r)))]
-    for k in range(1, n_anillos + 1):
-        phi = phi_max * k / n_anillos
-        for s in range(n_seg):
-            psi = 2.0 * math.pi * s / n_seg
-            radial = _add(_mul(e1, math.cos(psi)), _mul(e2, math.sin(psi)))
-            d = _add(_mul(a, math.cos(phi)), _mul(radial, math.sin(phi)))
-            vertices.append(_r3(_add(c, _mul(d, r))))
+            triangulos.append([a, b, c])
 
-    triangulos: List[List[int]] = [[0, 1 + s, 1 + (s + 1) % n_seg] for s in range(n_seg)]
-    for k in range(1, n_anillos):
-        base = 1 + (k - 1) * n_seg
-        sig = base + n_seg
-        for s in range(n_seg):
-            s1 = (s + 1) % n_seg
-            triangulos.append([base + s, sig + s, base + s1])
-            triangulos.append([base + s1, sig + s, sig + s1])
+            if j < n - i - 1:
+
+                d = indice[(i + 1, j + 1)]
+
+                triangulos.append([b, d, c])
+
     return vertices, triangulos
 
 
@@ -356,16 +394,19 @@ def _construir_superficies(
             "triangulos": [],
         }
         if generar_mallas:
-            if forma == "casquete":
-                item["vertices"], item["triangulos"] = _malla_casquete(esfera)
-            else:
-                lado_max = max(
-                    math.dist(xy[0], xy[1]), math.dist(xy[1], xy[2]), math.dist(xy[2], xy[0])
-                )
-                n = subdivisiones or max(4, min(16, math.ceil(lado_max / 2.0)))
-                item["vertices"], item["triangulos"] = _malla_triangulo(puntas, esfera, n)
-        superficies.append(item)
-
+            lado_max = max(
+                math.dist(xy[0], xy[1]),
+                math.dist(xy[1], xy[2]),
+                math.dist(xy[2], xy[0]),
+            )
+            # Más subdivisiones = superficie más suave.
+            n = subdivisiones or max(4,min(16, math.ceil(lado_max / 2.0)),
+            )
+            item["vertices"], item["triangulos"] = _malla_superficie_esferica(
+                puntas,
+                esfera,
+                n,
+            )
     return superficies, sin_esfera, evaluables
 
 

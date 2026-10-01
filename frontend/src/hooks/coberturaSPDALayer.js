@@ -56,17 +56,18 @@ function buildSuperficie(sup) {
       new THREE.MeshStandardMaterial({
         color: COLORS.superficie,
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.35,
         side: THREE.DoubleSide,
         depthWrite: false,
         roughness: 0.4,
+        flatShading: false,
       })
     )
   );
   g.add(
     new THREE.LineSegments(
       new THREE.WireframeGeometry(geo),
-      new THREE.LineBasicMaterial({ color: COLORS.malla, transparent: true, opacity: 0.55 })
+      new THREE.LineBasicMaterial({ color: COLORS.malla, transparent: true, opacity: 0.8 })
     )
   );
   return g;

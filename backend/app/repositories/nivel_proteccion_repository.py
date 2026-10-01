@@ -168,7 +168,19 @@ class NivelProteccionRepository:
             return res[0] if isinstance(res, list) and res else (res if res else {})
 
     @staticmethod
-    def get_nivel_proteccion_by_proyecto_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
-        """Fetch saved calculation by project ID (el más reciente)."""
-        query = "SELECT * FROM nivel_de_proteccion WHERE id_proyecto = %s ORDER BY id_nivel_proteccion DESC LIMIT 1;"
+    def get_nivel_proteccion_by_proyecto_id(
+        id_proyecto: str
+    ) -> Optional[Dict[str, Any]]:
+        """Obtiene el nivel de protección y el radio de esfera guardados para el proyecto."""
+
+        query = """
+            SELECT
+                nivel_proteccion,
+                radio_esfera
+            FROM nivel_de_proteccion
+            WHERE id_proyecto = %s
+            ORDER BY id_nivel_proteccion DESC
+            LIMIT 1;
+        """
+
         return fetch_one(query, (id_proyecto,))
