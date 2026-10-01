@@ -1,9 +1,9 @@
-import react, { useState } from 'react';
+import React, { useState } from 'react';
 import { Upload, FileText, AlertCircle, CheckCircle2, Loader2, Cpu, Edit3, Info } from 'lucide-react';
 import { planosApi } from '../api/planos';
 import { GeometriaViewer } from '../components/GeometriaViewer/GeometriaViewer';
 
-export const CargarYValidarPlano = ({ idProyecto,   idPlano: idPlanoProp,
+export const CargarYValidarPlano = ({ idProyecto, idPlano: idPlanoProp,
   idModelo2D: idModelo2DProp, onPlanoUploaded, onGeometriaConfirmed, onNext }) => {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +56,7 @@ export const CargarYValidarPlano = ({ idProyecto,   idPlano: idPlanoProp,
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="w-full space-y-5 px-3">
       <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Cargar y Validar Plano
       </h1>
@@ -76,8 +76,9 @@ export const CargarYValidarPlano = ({ idProyecto,   idPlano: idPlanoProp,
       )}
 
       {/* File Upload Header */}
-      <div className="card-hover bg-white border border-gray-200 rounded-md p-4 shadow-sm">
-        <label className="flex items-center gap-3 cursor-pointer group">
+      {/* File Upload Header */}
+      <div className="card-hover bg-white border border-gray-200 rounded-md p-4 shadow-sm flex items-center gap-3">
+        <label className="flex items-center gap-3 cursor-pointer group flex-1">
           <div className="w-10 h-10 rounded bg-blue-50 text-brand-blue flex items-center justify-center group-hover:bg-blue-100 group-hover:shadow-glow-sm transition">
             <Upload className="w-5 h-5" />
           </div>
@@ -97,21 +98,22 @@ export const CargarYValidarPlano = ({ idProyecto,   idPlano: idPlanoProp,
             onChange={handleFileChange}
             className="hidden"
           />
-          <button
-            type="button"
-            onClick={handleUpload}
-            disabled={!file || loading}
-            className="btn-electric px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-semibold rounded text-xs disabled:opacity-50 flex items-center gap-1.5 transition"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Interpretando Trazos...
-              </>
-            ) : (
-              'Subir e Interpretar Plano'
-            )}
-          </button>
         </label>
+
+        <button
+          type="button"
+          onClick={handleUpload}
+          disabled={!file || loading}
+          className="btn-electric px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-semibold rounded text-xs disabled:opacity-50 flex items-center gap-1.5 transition"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Interpretando Trazos...
+            </>
+          ) : (
+            'Subir e Interpretar Plano'
+          )}
+        </button>
       </div>
 
       {/* 2D Geometry Corrector Section */}

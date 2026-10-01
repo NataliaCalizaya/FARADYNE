@@ -34,6 +34,8 @@ import {
   Plus,
   Minus,
   X,
+  Maximize,
+  Minimize,
 } from 'lucide-react';
 
 import { planosApi } from '../../api/planos';
@@ -209,6 +211,16 @@ const errorMessage = (err, fallback) => {
   return err?.message || fallback;
 };
 
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 60;
+const FIT_MARGIN = 24;            // px entre el plano y el borde del canvas
+const MIN_STAGE_HEIGHT = 560;
+const STAGE_HEIGHT_RATIO = 0.85;  // alto del canvas respecto de la ventana
+const DEFAULT_BOX = { min_x: 0, min_y: 0, max_x: 20, max_y: 15 };
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+
 // </helpers>
 
 
@@ -246,14 +258,15 @@ export const GeometriaViewer = ({
   // VISTA
   // ========================================================
 
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [stageDimensions, setStageDimensions] = useState({
     width: 1200,
     height: 500,
   });
 
+  const rootRef = useRef(null);
   const containerRef = useRef(null);
   const isDraggingPan = useRef(false);
   const didPanRef = useRef(false);
@@ -323,8 +336,8 @@ export const GeometriaViewer = ({
 
   const selectedLevel = selectedLevelId
     ? cotasAltura.find(
-        (l) => String(l.id) === String(selectedLevelId)
-      ) || null
+      (l) => String(l.id) === String(selectedLevelId)
+    ) || null
     : null;
 
   const busy = saving || generating;
@@ -353,7 +366,12 @@ export const GeometriaViewer = ({
       setLineas(data.lineas || []);
       setCapas(data.capas || []);
       setCotasAltura(data.cotas_altura || []);
-      setBoundingBox(data.bounding_box || null);
+      setBoundingBox(
+        computeContentBox(data.poligonos, data.cotas_altura, data.bounding_box) ||
+        data.bounding_box ||
+        null
+      );
+      setView({ zoom: 1, pan: { x: 0, y: 0 } });
       // setTank(data.tank || null);
       setIsValidated(!!data.validado);
 
@@ -374,6 +392,37 @@ export const GeometriaViewer = ({
       loadPreview(idPlano);
     }
   }, [idPlano, loadPreview]);
+
+  // para que el plano no se re-escale mientras se arrastra un vértice.
+  const computeContentBox = (poligonos, niveles, base) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    const add = (x, y) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    };
+
+    if (base && Number.isFinite(base.min_x) && Number.isFinite(base.max_x)) {
+      add(base.min_x, base.min_y);
+      add(base.max_x, base.max_y);
+    }
+
+    (poligonos || []).forEach((p) =>
+      normalizePoints(p.puntos).forEach((pt) => add(pt.x, pt.y))
+    );
+
+    (niveles || []).forEach((l) => {
+      const [x, y] = getLevelPosition(l);
+      add(x, y);
+    });
+
+    if (!Number.isFinite(minX)) return null;
+
+    return { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY };
+  };
 
 
   // ========================================================
@@ -473,42 +522,51 @@ export const GeometriaViewer = ({
   // TRANSFORMACIÓN PLANO ↔ PANTALLA
   // ========================================================
 
-  const getTransform = () => {
-    const margin = 30;
+  const computeTransform = (zoomValue, panValue) => {
+    const cw = Math.max(stageDimensions.width - FIT_MARGIN * 2, 10);
+    const ch = Math.max(stageDimensions.height - FIT_MARGIN * 2, 10);
 
-    const cw = stageDimensions.width - margin * 2;
-    const ch = stageDimensions.height - margin * 2;
+    const box =
+      boundingBox && Number.isFinite(boundingBox.min_x) ? boundingBox : DEFAULT_BOX;
 
-    if (!boundingBox || boundingBox.min_x === undefined) {
-      return {
-        scale: zoom,
-        offsetX: margin + pan.x,
-        offsetY: margin + pan.y,
-      };
-    }
+    const spanX = Math.max(box.max_x - box.min_x, 0.5);
+    const spanY = Math.max(box.max_y - box.min_y, 0.5);
 
-    const bboxWidth = Math.max(boundingBox.max_x - boundingBox.min_x, 1);
-    const bboxHeight = Math.max(boundingBox.max_y - boundingBox.min_y, 1);
-
-    const baseScale = Math.min(cw / bboxWidth, ch / bboxHeight);
-    const scale = baseScale * zoom;
+    // El visor intercambia ejes: pantalla-x depende de y, pantalla-y de x.
+    const baseScale = Math.min(cw / spanY, ch / spanX);
+    const scale = baseScale * zoomValue;
 
     const offsetX =
-      margin +
-      (cw - bboxWidth * scale) / 2 -
-      boundingBox.min_x * scale +
-      pan.x;
+      FIT_MARGIN + (cw - spanY * scale) / 2 - box.min_y * scale + panValue.x;
 
     const offsetY =
-      margin +
-      (ch - bboxHeight * scale) / 2 -
-      boundingBox.min_y * scale +
-      pan.y;
+      FIT_MARGIN + (ch - spanX * scale) / 2 - box.min_x * scale + panValue.y;
 
     return { scale, offsetX, offsetY };
   };
 
-  const T = getTransform();
+  const T = computeTransform(view.zoom, view.pan);
+  const zoomAt = (pointer, factor) => {
+    setView((prev) => {
+      const newZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+      if (newZoom === prev.zoom) return prev;
+
+      const before = computeTransform(prev.zoom, prev.pan);
+      const after = computeTransform(newZoom, prev.pan);
+
+      // punto del plano que está bajo el cursor (ejes intercambiados)
+      const planY = (pointer.x - before.offsetX) / before.scale;
+      const planX = (pointer.y - before.offsetY) / before.scale;
+
+      return {
+        zoom: newZoom,
+        pan: {
+          x: prev.pan.x + (pointer.x - (planY * after.scale + after.offsetX)),
+          y: prev.pan.y + (pointer.y - (planX * after.scale + after.offsetY)),
+        },
+      };
+    });
+  };
 
   /*
    * Se mantiene la inversión de ejes usada por el visor:
@@ -534,7 +592,7 @@ export const GeometriaViewer = ({
   //   return inverseTransformPoint(pos.x, pos.y);
   // };
   // T.rotation debe estar en radianes. 
-// Ejemplo para 90 grados a la izquierda: T.rotation = -Math.PI / 2
+  // Ejemplo para 90 grados a la izquierda: T.rotation = -Math.PI / 2
 
   const transformPoint = (x, y) => [
     y * T.scale + T.offsetX,
@@ -570,9 +628,13 @@ export const GeometriaViewer = ({
   const handleWheel = (e) => {
     e.evt.preventDefault();
 
-    const factor = e.evt.deltaY < 0 ? 1.12 : 0.89;
+    const pointer = e.target.getStage()?.getPointerPosition();
 
-    setZoom((z) => Math.max(0.3, Math.min(20, z * factor)));
+    if (!pointer) {
+      return;
+    }
+
+    zoomAt(pointer, e.evt.deltaY < 0 ? 1.12 : 1 / 1.12);
   };
 
   const handlePointerDown = (e) => {
@@ -613,7 +675,10 @@ export const GeometriaViewer = ({
       didPanRef.current = true;
     }
 
-    setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+    setView((prev) => ({
+      ...prev,
+      pan: { x: prev.pan.x + dx, y: prev.pan.y + dy },
+    }));
   };
 
   const handlePointerUp = () => {
@@ -621,8 +686,13 @@ export const GeometriaViewer = ({
   };
 
   const resetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    const box = computeContentBox(poligonos, cotasAltura, boundingBox);
+
+    if (box) {
+      setBoundingBox(box);
+    }
+
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
   };
 
 
@@ -726,20 +796,20 @@ export const GeometriaViewer = ({
       () =>
         kind === 'triangle'
           ? planosApi.createTriangulo(idModelo2D, {
-              puntos: points,
-              capa,
-              page: 0,
-              tipo_cubierta: 'pendiente_por_resolver',
-            })
+            puntos: points,
+            capa,
+            page: 0,
+            tipo_cubierta: 'pendiente_por_resolver',
+          })
           : planosApi.createRectangulo(idModelo2D, {
-              x1: points[0][0],
-              y1: points[0][1],
-              x2: points[1][0],
-              y2: points[1][1],
-              capa,
-              page: 0,
-              tipo_cubierta: 'pendiente_por_resolver',
-            }),
+            x1: points[0][0],
+            y1: points[0][1],
+            x2: points[1][0],
+            y2: points[1][1],
+            capa,
+            page: 0,
+            tipo_cubierta: 'pendiente_por_resolver',
+          }),
       kind === 'triangle'
         ? 'No se pudo crear el triángulo.'
         : 'No se pudo crear el rectángulo.'
@@ -1207,6 +1277,22 @@ export const GeometriaViewer = ({
     }
   };
 
+  useEffect(() => {
+    const onChange = () =>
+      setIsFullscreen(document.fullscreenElement === rootRef.current);
+
+    document.addEventListener('fullscreenchange', onChange);
+
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      rootRef.current?.requestFullscreen?.();
+    }
+  };
 
   // ========================================================
   // RESIZE
@@ -1214,22 +1300,41 @@ export const GeometriaViewer = ({
 
   useEffect(() => {
     const updateSize = () => {
-      if (!containerRef.current) {
+      const el = containerRef.current;
+
+      if (!el) {
         return;
       }
 
-      setStageDimensions({
-        width: containerRef.current.clientWidth || 1200,
-        height: 500,
-      });
+      const width = el.clientWidth || 1200;
+      const ratio = isFullscreen ? 0.7 : 0.88;
+      const height = Math.max(
+        MIN_STAGE_HEIGHT,
+        Math.round(window.innerHeight * ratio)
+      );
+
+      setStageDimensions((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height }
+      );
     };
+
 
     updateSize();
 
     window.addEventListener('resize', updateSize);
 
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
+    let observer = null;
+
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      observer = new ResizeObserver(updateSize);
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateSize);
+      if (observer) observer.disconnect();
+    };
+  }, [isFullscreen]);
 
 
   // ========================================================
@@ -1277,9 +1382,9 @@ export const GeometriaViewer = ({
   // La superficie seleccionada se dibuja al final (queda arriba).
   const orderedPolys = selectedPoly
     ? [
-        ...poligonos.filter((p) => String(p.id) !== String(selectedPoly.id)),
-        selectedPoly,
-      ]
+      ...poligonos.filter((p) => String(p.id) !== String(selectedPoly.id)),
+      selectedPoly,
+    ]
     : poligonos;
 
   const isEmptyGeometry =
@@ -1314,8 +1419,10 @@ export const GeometriaViewer = ({
 
   return (
 
-    <div className="space-y-4">
-
+    <div
+      ref={rootRef}
+      className={`space-y-4 ${isFullscreen ? 'bg-white p-4 overflow-auto h-screen' : ''}`}
+    >
 
       {/* ====================================================
           CABECERA
@@ -1376,11 +1483,10 @@ export const GeometriaViewer = ({
             type="button"
             onClick={() => startSurface('triangle')}
             disabled={busy}
-            className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 ${
-              mode === 'triangle' || draft?.kind === 'triangle'
-                ? 'bg-brand-blue text-white border-brand-blue'
-                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-            }`}
+            className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 ${mode === 'triangle' || draft?.kind === 'triangle'
+              ? 'bg-brand-blue text-white border-brand-blue'
+              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
           >
             <Triangle className="w-3.5 h-3.5" />
             Triángulo
@@ -1390,11 +1496,10 @@ export const GeometriaViewer = ({
             type="button"
             onClick={() => startSurface('rectangle')}
             disabled={busy}
-            className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 ${
-              mode === 'rectangle' || draft?.kind === 'rectangle'
-                ? 'bg-brand-blue text-white border-brand-blue'
-                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-            }`}
+            className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 ${mode === 'rectangle' || draft?.kind === 'rectangle'
+              ? 'bg-brand-blue text-white border-brand-blue'
+              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
           >
             <Square className="w-3.5 h-3.5" />
             Rectángulo
@@ -1451,11 +1556,10 @@ export const GeometriaViewer = ({
                 type="button"
                 onClick={toggleVertexMode}
                 disabled={busy || (!!mode && mode !== 'vertex')}
-                className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 disabled:opacity-50 ${
-                  mode === 'vertex'
-                    ? 'bg-brand-blue text-white border-brand-blue'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
+                className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 disabled:opacity-50 ${mode === 'vertex'
+                  ? 'bg-brand-blue text-white border-brand-blue'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
                 title="Haga clic sobre un lado de la superficie para insertar un vértice"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -1498,16 +1602,20 @@ export const GeometriaViewer = ({
 
           <button
             type="button"
-            onClick={() => setZoom((z) => Math.min(6, z * 1.2))}
+            onClick={() =>
+              zoomAt({ x: stageDimensions.width / 2, y: stageDimensions.height / 2 }, 1.25)
+            }
             className="p-1.5 bg-white border border-gray-300 rounded"
-            title="Acercar"
-          >
+            title="Acercar">
+
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
 
           <button
             type="button"
-            onClick={() => setZoom((z) => Math.max(0.3, z * 0.8))}
+            onClick={() =>
+              zoomAt({ x: stageDimensions.width / 2, y: stageDimensions.height / 2 }, 1 / 1.25)
+            }
             className="p-1.5 bg-white border border-gray-300 rounded"
             title="Alejar"
           >
@@ -1516,11 +1624,15 @@ export const GeometriaViewer = ({
 
           <button
             type="button"
-            onClick={resetView}
+            onClick={toggleFullscreen}
             className="p-1.5 bg-white border border-gray-300 rounded"
-            title="Restablecer vista"
+            title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            {isFullscreen ? (
+              <Minimize className="w-3.5 h-3.5" />
+            ) : (
+              <Maximize className="w-3.5 h-3.5" />
+            )}
           </button>
 
         </div>
@@ -1654,7 +1766,7 @@ export const GeometriaViewer = ({
       <div
         ref={containerRef}
         className="relative bg-slate-50 border border-gray-300 rounded-md flex items-center justify-center overflow-hidden"
-        style={{ minHeight: 500 }}
+        style={{ minHeight: stageDimensions.height }}
       >
 
         {loading ? (
@@ -2106,10 +2218,10 @@ export const GeometriaViewer = ({
 
       <div className="grid gap-3 md:grid-cols-2 text-xs">
 
-        <div className="bg-white border border-gray-200 rounded-md p-3">
+        <div className="bg-gradient-to-br from-blue-50 to-white border border-blue-200 rounded-md p-3 shadow-sm">
 
-          <div className="font-semibold text-gray-700 mb-1">
-            Superficie seleccionada
+          <div className="font-semibold text-brand-blue mb-1 flex items-center gap-1.5">
+            <Square className="w-3.5 h-3.5" /> Superficie seleccionada
           </div>
 
           {!selectedPoly ? (
@@ -2162,10 +2274,10 @@ export const GeometriaViewer = ({
 
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-md p-3">
+        <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-md p-3 shadow-sm">
 
-          <div className="font-semibold text-gray-700 mb-1">
-            Nivel seleccionado
+          <div className="font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+            <Ruler className="w-3.5 h-3.5" /> Nivel seleccionado
           </div>
 
           {!selectedLevel ? (
