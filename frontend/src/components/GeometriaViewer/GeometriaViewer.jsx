@@ -17,14 +17,14 @@ import {
 } from 'react-konva';
 
 import {
-  AlertTriangle,
   CheckCircle,
+  CheckCircle2,
+  AlertTriangle,
   Info,
   Loader2,
   HelpCircle,
   ZoomIn,
   ZoomOut,
-  RefreshCw,
   Trash2,
   Ruler,
   Link,
@@ -36,6 +36,10 @@ import {
   X,
   Maximize,
   Minimize,
+  MousePointer2,
+  Pencil,
+  Scan,
+  ArrowRight,
 } from 'lucide-react';
 
 import { planosApi } from '../../api/planos';
@@ -57,11 +61,18 @@ const COLORS = {
   draft: '#2a9d5c',
 };
 
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 60;
+const FIT_MARGIN = 24;
+const MIN_STAGE_HEIGHT = 560;
+const DEFAULT_BOX = { min_x: 0, min_y: 0, max_x: 20, max_y: 15 };
+
 
 // ==========================================================
 // UTILIDADES (funciones puras)
 // ==========================================================
-// <helpers>
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 const getPointCoords = (pt) => {
   if (Array.isArray(pt)) {
@@ -81,9 +92,7 @@ const normalizePoints = (points) =>
     return { x, y };
   });
 
-/*
- * Punto de la recta a-b más cercano a (px, py), limitado al segmento.
- */
+// Punto de la recta a-b más cercano a (px, py), limitado al segmento.
 const closestOnSegment = (px, py, ax, ay, bx, by) => {
   const dx = bx - ax;
   const dy = by - ay;
@@ -98,11 +107,8 @@ const closestOnSegment = (px, py, ax, ay, bx, by) => {
   return { x, y, dist: Math.hypot(px - x, py - y) };
 };
 
-/*
- * "Lado" = arista i del polígono: va de puntos[i] a puntos[i + 1]
- * (el último lado cierra con el primer punto). Es el mismo criterio
- * que usa el backend.
- */
+// "Lado" = arista i del polígono: va de puntos[i] a puntos[i + 1]
+// (el último lado cierra con el primer punto). Igual criterio que el backend.
 const nearestSide = (points, px, py) => {
   const pts = normalizePoints(points);
   let best = null;
@@ -122,10 +128,7 @@ const nearestSide = (points, px, py) => {
 const formatLevelText = (value) =>
   `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
 
-/*
- * Acepta "+7.90", "7,9", "-1.2", "−1.20", "±0.00", "7.9 m".
- * Devuelve null si no es un número válido.
- */
+// Acepta "+7.90", "7,9", "-1.2", "−1.20", "±0.00", "7.9 m".
 const parseLevelValue = (raw) => {
   const clean = String(raw ?? '')
     .trim()
@@ -168,12 +171,7 @@ const getLinePoints = (line) => {
     line?.x2 !== undefined &&
     line?.y2 !== undefined
   ) {
-    return [
-      Number(line.x1),
-      Number(line.y1),
-      Number(line.x2),
-      Number(line.y2),
-    ];
+    return [Number(line.x1), Number(line.y1), Number(line.x2), Number(line.y2)];
   }
 
   if (Array.isArray(line?.inicio) && Array.isArray(line?.fin)) {
@@ -211,17 +209,134 @@ const errorMessage = (err, fallback) => {
   return err?.message || fallback;
 };
 
-const MIN_ZOOM = 0.2;
-const MAX_ZOOM = 60;
-const FIT_MARGIN = 24;            // px entre el plano y el borde del canvas
-const MIN_STAGE_HEIGHT = 560;
-const STAGE_HEIGHT_RATIO = 0.85;  // alto del canvas respecto de la ventana
-const DEFAULT_BOX = { min_x: 0, min_y: 0, max_x: 20, max_y: 15 };
+// Caja que contiene todo el contenido: el plano no se re-escala al arrastrar.
+const computeContentBox = (poligonos, niveles, base) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
 
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const add = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  };
+
+  if (base && Number.isFinite(base.min_x) && Number.isFinite(base.max_x)) {
+    add(base.min_x, base.min_y);
+    add(base.max_x, base.max_y);
+  }
+
+  (poligonos || []).forEach((p) =>
+    normalizePoints(p.puntos).forEach((pt) => add(pt.x, pt.y))
+  );
+
+  (niveles || []).forEach((l) => {
+    const [x, y] = getLevelPosition(l);
+    add(x, y);
+  });
+
+  if (!Number.isFinite(minX)) return null;
+
+  return { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY };
+};
 
 
-// </helpers>
+// ==========================================================
+// PEQUEÑOS COMPONENTES DE INTERFAZ
+// ==========================================================
+
+const Kbd = ({ children }) => (
+  <kbd className="ml-1.5 px-1 py-px rounded bg-white/20 text-[10px] font-mono">
+    {children}
+  </kbd>
+);
+
+// Botón de la paleta flotante (icono + tooltip con atajo).
+const ToolButton = ({ icon: Icon, label, shortcut, active, disabled, onClick }) => (
+  <div className="relative group">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={!!active}
+      className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all disabled:opacity-40 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${active
+          ? 'bg-brand-blue text-white shadow-md scale-105'
+          : 'text-gray-600 hover:bg-blue-50 hover:text-brand-blue'
+        }`}
+    >
+      <Icon className="w-[18px] h-[18px]" />
+    </button>
+
+    <span className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 whitespace-nowrap rounded-md bg-gray-900 text-white text-[11px] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity z-30 flex items-center">
+      {label}
+      {shortcut && <Kbd>{shortcut}</Kbd>}
+    </span>
+  </div>
+);
+
+// Botón de acción dentro del inspector.
+const ActionButton = ({
+  icon: Icon,
+  children,
+  onClick,
+  disabled,
+  variant = 'default',
+  active = false,
+  title,
+}) => {
+  const styles = {
+    default: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
+    primary: 'bg-brand-blue text-white border-brand-blue hover:bg-brand-hover',
+    danger: 'bg-white text-red-600 border-red-200 hover:bg-red-50',
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`px-2.5 py-1.5 rounded-md text-[11px] font-medium border flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${active ? styles.primary : styles[variant]
+        }`}
+    >
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      {children}
+    </button>
+  );
+};
+
+const IconButton = ({ icon: Icon, label, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={label}
+    aria-label={label}
+    className="w-8 h-8 rounded-md flex items-center justify-center text-gray-600 hover:bg-blue-50 hover:text-brand-blue transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+  >
+    <Icon className="w-4 h-4" />
+  </button>
+);
+
+const StatChip = ({ children, tone = 'neutral', title }) => {
+  const tones = {
+    neutral: 'bg-gray-100 text-gray-700',
+    good: 'bg-emerald-50 text-emerald-700',
+    warn: 'bg-amber-50 text-amber-800',
+  };
+
+  return (
+    <span
+      title={title}
+      className={`px-2.5 py-1 rounded-full text-[11px] font-medium ${tones[tone]}`}
+    >
+      {children}
+    </span>
+  );
+};
 
 
 // ==========================================================
@@ -252,7 +367,7 @@ export const GeometriaViewer = ({
 
   const [boundingBox, setBoundingBox] = useState(null);
   const [isValidated, setIsValidated] = useState(false);
-  //const [tank, setTank] = useState(null);
+
 
   // ========================================================
   // VISTA
@@ -260,6 +375,9 @@ export const GeometriaViewer = ({
 
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [hoverPolyId, setHoverPolyId] = useState(null);
+  const [hoverTarget, setHoverTarget] = useState(false);
 
   const [stageDimensions, setStageDimensions] = useState({
     width: 1200,
@@ -289,7 +407,7 @@ export const GeometriaViewer = ({
   // ========================================================
 
   /*
-    null       → sin herramienta
+    null       → seleccionar / mover
     triangle   → creando triángulo (3 clics)
     rectangle  → creando rectángulo (2 clics)
     level      → colocando un nivel (1 clic)
@@ -297,12 +415,12 @@ export const GeometriaViewer = ({
   */
   const [mode, setMode] = useState(null);
 
-  // Puntos de la superficie que se está dibujando.
   const [draft, setDraft] = useState(null);
   const draftRef = useRef(null);
-
-  // Valor del nivel que se va a colocar.
   const pendingLevelRef = useRef(null);
+
+  // Diálogo para escribir el valor de un nivel (reemplaza a window.prompt).
+  const [levelDialog, setLevelDialog] = useState(null);
 
 
   // ========================================================
@@ -335,9 +453,7 @@ export const GeometriaViewer = ({
     : null;
 
   const selectedLevel = selectedLevelId
-    ? cotasAltura.find(
-      (l) => String(l.id) === String(selectedLevelId)
-    ) || null
+    ? cotasAltura.find((l) => String(l.id) === String(selectedLevelId)) || null
     : null;
 
   const busy = saving || generating;
@@ -372,7 +488,6 @@ export const GeometriaViewer = ({
         null
       );
       setView({ zoom: 1, pan: { x: 0, y: 0 } });
-      // setTank(data.tank || null);
       setIsValidated(!!data.validado);
 
     } catch (err) {
@@ -392,37 +507,6 @@ export const GeometriaViewer = ({
       loadPreview(idPlano);
     }
   }, [idPlano, loadPreview]);
-
-  // para que el plano no se re-escale mientras se arrastra un vértice.
-  const computeContentBox = (poligonos, niveles, base) => {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    const add = (x, y) => {
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-    };
-
-    if (base && Number.isFinite(base.min_x) && Number.isFinite(base.max_x)) {
-      add(base.min_x, base.min_y);
-      add(base.max_x, base.max_y);
-    }
-
-    (poligonos || []).forEach((p) =>
-      normalizePoints(p.puntos).forEach((pt) => add(pt.x, pt.y))
-    );
-
-    (niveles || []).forEach((l) => {
-      const [x, y] = getLevelPosition(l);
-      add(x, y);
-    });
-
-    if (!Number.isFinite(minX)) return null;
-
-    return { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY };
-  };
 
 
   // ========================================================
@@ -517,6 +601,15 @@ export const GeometriaViewer = ({
     }
   }, [polyById, cotasAltura, selectedPolyId, selectedLevelId]);
 
+  // Los avisos informativos se cierran solos.
+  useEffect(() => {
+    if (!info) return undefined;
+
+    const t = setTimeout(() => setInfo(null), 7000);
+
+    return () => clearTimeout(t);
+  }, [info]);
+
 
   // ========================================================
   // TRANSFORMACIÓN PLANO ↔ PANTALLA
@@ -546,6 +639,7 @@ export const GeometriaViewer = ({
   };
 
   const T = computeTransform(view.zoom, view.pan);
+
   const zoomAt = (pointer, factor) => {
     setView((prev) => {
       const newZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
@@ -568,32 +662,7 @@ export const GeometriaViewer = ({
     });
   };
 
-  /*
-   * Se mantiene la inversión de ejes usada por el visor:
-   * plano (x, y) → pantalla (y, x).
-   */
-  // const transformPoint = (x, y) => [
-  //   y * T.scale + T.offsetX,
-  //   x * T.scale + T.offsetY,
-  // ];
-
-  // const inverseTransformPoint = (screenX, screenY) => [
-  //   (screenY - T.offsetY) / T.scale,
-  //   (screenX - T.offsetX) / T.scale,
-  // ];
-
-  // const pointerToPlan = (stage) => {
-  //   const pos = stage?.getPointerPosition();
-
-  //   if (!pos) {
-  //     return null;
-  //   }
-
-  //   return inverseTransformPoint(pos.x, pos.y);
-  // };
-  // T.rotation debe estar en radianes. 
-  // Ejemplo para 90 grados a la izquierda: T.rotation = -Math.PI / 2
-
+  // Plano (x, y) → pantalla (y, x)
   const transformPoint = (x, y) => [
     y * T.scale + T.offsetX,
     x * T.scale + T.offsetY,
@@ -603,12 +672,7 @@ export const GeometriaViewer = ({
     const x = (screenX - T.offsetX) / T.scale;
     const y = (screenY - T.offsetY) / T.scale;
 
-    // Inversa de la rotación 90° antihoraria:
-    // (x, y) -> (y, -x)
-    return [
-      y,
-      x,
-    ];
+    return [y, x];
   };
 
   const pointerToPlan = (stage) => {
@@ -620,6 +684,7 @@ export const GeometriaViewer = ({
 
     return inverseTransformPoint(pos.x, pos.y);
   };
+
 
   // ========================================================
   // ZOOM Y PAN
@@ -648,6 +713,7 @@ export const GeometriaViewer = ({
 
     if (e.target === e.target.getStage()) {
       isDraggingPan.current = true;
+      setIsPanning(true);
 
       lastPointerPos.current = {
         x: e.evt.clientX,
@@ -683,6 +749,7 @@ export const GeometriaViewer = ({
 
   const handlePointerUp = () => {
     isDraggingPan.current = false;
+    setIsPanning(false);
   };
 
   const resetView = () => {
@@ -694,6 +761,12 @@ export const GeometriaViewer = ({
 
     setView({ zoom: 1, pan: { x: 0, y: 0 } });
   };
+
+  const zoomFromCenter = (factor) =>
+    zoomAt(
+      { x: stageDimensions.width / 2, y: stageDimensions.height / 2 },
+      factor
+    );
 
 
   // ========================================================
@@ -715,29 +788,6 @@ export const GeometriaViewer = ({
 
     pendingLevelRef.current = null;
   };
-
-  // Esc cancela la herramienta activa.
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setMode(null);
-
-        draftRef.current = null;
-        setDraft(null);
-
-        pendingLevelRef.current = null;
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-
-  // ========================================================
-  // CAPA PARA SUPERFICIES NUEVAS
-  // ========================================================
 
   const getSurfaceLayer = () => {
     const names = capas.map(layerName).filter(Boolean);
@@ -781,6 +831,14 @@ export const GeometriaViewer = ({
     setDraft({ kind, points: [] });
 
     setMode(kind);
+  };
+
+  const toggleSurfaceTool = (kind) => {
+    if (mode === kind) {
+      cancelMode();
+    } else {
+      startSurface(kind);
+    }
   };
 
   const submitSurface = async (kind, points) => {
@@ -860,29 +918,64 @@ export const GeometriaViewer = ({
   // NIVELES: CREAR / MODIFICAR / ELIMINAR
   // ========================================================
 
-  const handleCreateLevel = () => {
+  const openCreateLevel = () => {
     if (!idModelo2D) {
       return;
     }
 
-    const text = window.prompt('Ingrese el valor del nivel (ej. +7.90):');
+    cancelMode();
+    setLevelDialog({ kind: 'create', value: '', error: '' });
+  };
 
-    if (text === null) {
+  const openEditLevel = (level) => {
+    if (!level?.id || !idModelo2D) {
       return;
     }
 
-    const valor = parseLevelValue(text);
+    setLevelDialog({
+      kind: 'edit',
+      level,
+      value: String(level.valor),
+      error: '',
+    });
+  };
+
+  const confirmLevelDialog = async () => {
+    const d = levelDialog;
+
+    if (!d) {
+      return;
+    }
+
+    const valor = parseLevelValue(d.value);
 
     if (valor === null) {
-      setError('El valor del nivel no es válido.');
+      setLevelDialog({
+        ...d,
+        error: 'Ingrese un número válido, por ejemplo +7.90 o -1,20.',
+      });
       return;
     }
 
-    setError(null);
-    setInfo(null);
+    setLevelDialog(null);
 
-    pendingLevelRef.current = { valor };
-    setMode('level');
+    if (d.kind === 'create') {
+      // Ahora hay que hacer clic en el plano para ubicarlo.
+      setError(null);
+      setInfo(null);
+      pendingLevelRef.current = { valor };
+      setMode('level');
+      return;
+    }
+
+    await runMutation(
+      () =>
+        planosApi.updateNivel(idModelo2D, d.level.id, {
+          valor,
+          texto: formatLevelText(valor),
+        }),
+      'No se pudo actualizar el nivel.'
+    );
   };
 
   const placeLevel = async (x, y) => {
@@ -921,37 +1014,9 @@ export const GeometriaViewer = ({
     if (nivel && nivel.asociado === false) {
       setInfo(
         'Nivel creado sin asociar (no hay una superficie cerca). ' +
-        'Seleccione una superficie, elija su lado y presione «Asociar nivel».'
+        'Seleccione una superficie, elija su lado y presione «Asociar».'
       );
     }
-  };
-
-  const handleUpdateLevel = async (level) => {
-    if (!level?.id || !idModelo2D) {
-      return;
-    }
-
-    const text = window.prompt('Nuevo valor del nivel:', String(level.valor));
-
-    if (text === null) {
-      return;
-    }
-
-    const valor = parseLevelValue(text);
-
-    if (valor === null) {
-      setError('El valor ingresado no es válido.');
-      return;
-    }
-
-    await runMutation(
-      () =>
-        planosApi.updateNivel(idModelo2D, level.id, {
-          valor,
-          texto: formatLevelText(valor),
-        }),
-      'No se pudo actualizar el nivel.'
-    );
   };
 
   const handleDeleteLevel = async () => {
@@ -1051,7 +1116,6 @@ export const GeometriaViewer = ({
 
   // ========================================================
   // POLÍGONOS: MOVER / AGREGAR / ELIMINAR VÉRTICES Y ELIMINAR
-  // (iguales para triángulos, rectángulos y reconocidos)
   // ========================================================
 
   const handleVertexDrag = (polyId, vertexIndex, screenX, screenY) => {
@@ -1215,9 +1279,21 @@ export const GeometriaViewer = ({
 
     // El lado más cercano al clic queda marcado para asociarle un nivel.
     if (p) {
-      const near = nearestSide(poly.puntos, p[0], p[1]);
+      const near = nearestSide(poly.points ?? poly.puntos, p[0], p[1]);
       setSelectedSide(near ? near.side : null);
     }
+  };
+
+  // Cursor "pointer" al pasar sobre algo que se puede seleccionar.
+  const hoverOn = (polyId = null) => {
+    if (mode) return;
+    setHoverTarget(true);
+    setHoverPolyId(polyId);
+  };
+
+  const hoverOff = () => {
+    setHoverTarget(false);
+    setHoverPolyId(null);
   };
 
 
@@ -1277,6 +1353,11 @@ export const GeometriaViewer = ({
     }
   };
 
+
+  // ========================================================
+  // PANTALLA COMPLETA Y TAMAÑO
+  // ========================================================
+
   useEffect(() => {
     const onChange = () =>
       setIsFullscreen(document.fullscreenElement === rootRef.current);
@@ -1293,10 +1374,6 @@ export const GeometriaViewer = ({
       rootRef.current?.requestFullscreen?.();
     }
   };
-
-  // ========================================================
-  // RESIZE
-  // ========================================================
 
   useEffect(() => {
     const updateSize = () => {
@@ -1318,7 +1395,6 @@ export const GeometriaViewer = ({
       );
     };
 
-
     updateSize();
 
     window.addEventListener('resize', updateSize);
@@ -1335,6 +1411,65 @@ export const GeometriaViewer = ({
       if (observer) observer.disconnect();
     };
   }, [isFullscreen]);
+
+
+  // ========================================================
+  // ATAJOS DE TECLADO
+  // ========================================================
+
+  /*
+   * Los atajos leen siempre la última versión de las acciones a través de
+   * una ref, así el listener se registra una sola vez.
+   */
+  const actionsRef = useRef({});
+
+  actionsRef.current = {
+    locked: busy || !!levelDialog,
+    select: cancelMode,
+    triangle: () => toggleSurfaceTool('triangle'),
+    rectangle: () => toggleSurfaceTool('rectangle'),
+    level: openCreateLevel,
+    fit: resetView,
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        actionsRef.current.select();
+        setLevelDialog(null);
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        return;
+      }
+
+      const tag = e.target?.tagName;
+
+      if (tag === 'INPUT' || tag === 'TEXTAREA') {
+        return;
+      }
+
+      const a = actionsRef.current;
+
+      if (a.locked) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'v': a.select(); break;
+        case 't': a.triangle(); break;
+        case 'r': a.rectangle(); break;
+        case 'n': a.level(); break;
+        case 'f': a.fit(); break;
+        default: break;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
 
   // ========================================================
@@ -1390,7 +1525,7 @@ export const GeometriaViewer = ({
   const isEmptyGeometry =
     !loading && poligonos.length === 0 && lineas.length === 0;
 
-  const toolsLocked = busy || !!mode;
+  const toolsLocked = busy;
 
   const roleOf = (poly, levelId) => {
     const id = String(levelId);
@@ -1402,15 +1537,35 @@ export const GeometriaViewer = ({
     return '—';
   };
 
+  const slopeDefined = !!selectedPoly?.pendiente?.definida;
+
   const pendienteText = (poly) => {
     const p = poly?.pendiente;
 
     if (p?.definida) {
-      return `definida · desnivel ${Number(p.desnivel).toFixed(2)} m`;
+      return `Pendiente definida · desnivel ${Number(p.desnivel).toFixed(2)} m`;
     }
 
-    return 'sin definir (se necesitan dos niveles en lados distintos)';
+    return 'Sin pendiente: faltan dos niveles en lados distintos';
   };
+
+  const withoutSlope = poligonos.filter((p) => !p.pendiente?.definida).length;
+  const linkedLevels = cotasAltura.filter(
+    (l) => (l.asociaciones || []).length > 0
+  ).length;
+
+  const canvasCursor = mode
+    ? 'crosshair'
+    : isPanning && didPanRef.current
+      ? 'grabbing'
+      : hoverTarget
+        ? 'pointer'
+        : 'grab';
+
+  const levelPreview =
+    levelDialog && parseLevelValue(levelDialog.value) !== null
+      ? formatLevelText(parseLevelValue(levelDialog.value))
+      : null;
 
 
   // ========================================================
@@ -1421,353 +1576,496 @@ export const GeometriaViewer = ({
 
     <div
       ref={rootRef}
-      className={`space-y-4 ${isFullscreen ? 'bg-white p-4 overflow-auto h-screen' : ''}`}
+      className={`space-y-3 ${isFullscreen ? 'bg-white p-4 overflow-auto h-screen' : ''}`}
     >
 
       {/* ====================================================
-          CABECERA
+          BARRA DE ESTADO / AYUDA CONTEXTUAL
       ==================================================== */}
 
-      <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-md flex items-start gap-2 text-xs">
+      <div
+        className={`rounded-lg border px-3.5 py-2.5 flex flex-wrap items-center gap-3 text-xs transition-colors ${mode
+            ? 'bg-blue-50 border-blue-200 text-blue-900'
+            : 'bg-white border-gray-200 text-gray-600'
+          }`}
+      >
+        {mode ? (
+          <Info className="w-4 h-4 shrink-0 text-brand-blue" />
+        ) : (
+          <MousePointer2 className="w-4 h-4 shrink-0 text-gray-400" />
+        )}
 
-        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-
-        <div>
-
-          <strong>CORRECTOR 2D INTERACTIVO:</strong>
-
-          <div className="mt-1">
-            Puede modificar la geometría reconocida, agregar o quitar
-            vértices, agregar superficies y asociar niveles al lado de una
-            superficie para generar su pendiente.
-          </div>
-
-        </div>
-
-      </div>
-
-
-      {/* ====================================================
-          ERROR / INFO
-      ==================================================== */}
-
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md text-xs">
-          {error}
-        </div>
-      )}
-
-      {info && !error && (
-        <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-md text-xs flex items-start gap-2">
-          <Info className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{info}</span>
-        </div>
-      )}
-
-
-      {/* ====================================================
-          TOOLBAR
-      ==================================================== */}
-
-      <div className="bg-white border border-gray-200 rounded-md p-3 shadow-sm">
-
-        <div className="flex flex-wrap items-center gap-2">
-
-          {/* ---------- AGREGAR SUPERFICIE ---------- */}
-
-          <span className="text-xs font-semibold text-gray-600 mr-1">
-            Agregar superficie:
-          </span>
-
-          <button
-            type="button"
-            onClick={() => startSurface('triangle')}
-            disabled={busy}
-            className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 ${mode === 'triangle' || draft?.kind === 'triangle'
-              ? 'bg-brand-blue text-white border-brand-blue'
-              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-              }`}
-          >
-            <Triangle className="w-3.5 h-3.5" />
-            Triángulo
-          </button>
-
-          <button
-            type="button"
-            onClick={() => startSurface('rectangle')}
-            disabled={busy}
-            className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 ${mode === 'rectangle' || draft?.kind === 'rectangle'
-              ? 'bg-brand-blue text-white border-brand-blue'
-              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-              }`}
-          >
-            <Square className="w-3.5 h-3.5" />
-            Rectángulo
-          </button>
-
-          {mode && (
-            <button
-              type="button"
-              onClick={cancelMode}
-              className="px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 text-red-700 border-red-300 hover:bg-red-50"
-            >
-              <X className="w-3.5 h-3.5" />
-              {mode === 'vertex' ? 'Listo' : 'Cancelar'}
-            </button>
-          )}
-
-          <div className="h-5 w-px bg-gray-300 mx-2" />
-
-          {/* ---------- NIVEL ---------- */}
-
-          <button
-            type="button"
-            onClick={handleCreateLevel}
-            disabled={toolsLocked || !idModelo2D}
-            className="px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 bg-white text-gray-700 border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-          >
-            <Ruler className="w-3.5 h-3.5" />
-            Agregar nivel
-          </button>
-
-          {selectedLevel && (
-            <button
-              type="button"
-              onClick={handleDeleteLevel}
-              disabled={toolsLocked}
-              className="px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 text-red-700 border-red-300 hover:bg-red-50 disabled:opacity-50"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Eliminar nivel
-            </button>
-          )}
-
-          {/* ---------- SUPERFICIE SELECCIONADA ---------- */}
-
-          {selectedPoly && (
-            <>
-              <div className="h-5 w-px bg-gray-300 mx-2" />
-
-              <span className="text-xs font-semibold text-gray-600 mr-1">
-                Superficie:
-              </span>
-
-              <button
-                type="button"
-                onClick={toggleVertexMode}
-                disabled={busy || (!!mode && mode !== 'vertex')}
-                className={`px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 disabled:opacity-50 ${mode === 'vertex'
-                  ? 'bg-brand-blue text-white border-brand-blue'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                  }`}
-                title="Haga clic sobre un lado de la superficie para insertar un vértice"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Agregar vértice
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleRemoveVertex(selectedPoly, selectedVertex)}
-                disabled={toolsLocked || selectedVertex === null}
-                className="px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 bg-white text-gray-700 border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-                title="Seleccione un vértice (clic) y presione este botón, o haga doble clic sobre él"
-              >
-                <Minus className="w-3.5 h-3.5" />
-                Eliminar vértice
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDeletePolygon}
-                disabled={toolsLocked}
-                className="px-3 py-1.5 rounded text-xs font-medium border flex items-center gap-1.5 text-red-700 border-red-300 hover:bg-red-50 disabled:opacity-50"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Eliminar superficie
-              </button>
-            </>
-          )}
-
-          <div className="flex-1" />
-
-          {busy && (
-            <span className="text-xs text-gray-500 flex items-center gap-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Guardando...
-            </span>
-          )}
-
-          {/* ---------- ZOOM ---------- */}
-
-          <button
-            type="button"
-            onClick={() =>
-              zoomAt({ x: stageDimensions.width / 2, y: stageDimensions.height / 2 }, 1.25)
-            }
-            className="p-1.5 bg-white border border-gray-300 rounded"
-            title="Acercar">
-
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              zoomAt({ x: stageDimensions.width / 2, y: stageDimensions.height / 2 }, 1 / 1.25)
-            }
-            className="p-1.5 bg-white border border-gray-300 rounded"
-            title="Alejar"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="p-1.5 bg-white border border-gray-300 rounded"
-            title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-          >
-            {isFullscreen ? (
-              <Minimize className="w-3.5 h-3.5" />
-            ) : (
-              <Maximize className="w-3.5 h-3.5" />
-            )}
-          </button>
-
-        </div>
-
-
-        {/* ---------- ASOCIACIONES ---------- */}
-
-        <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-
-          <span className="text-xs font-semibold text-gray-600 mr-1">
-            Niveles:
-          </span>
-
-          <button
-            type="button"
-            onClick={handleAssociateLevel}
-            disabled={toolsLocked || !selectedPoly || !selectedLevel}
-            className="px-3 py-1.5 rounded text-xs border bg-white hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
-            title="Seleccione una superficie (se marca su lado más cercano al clic) y un nivel"
-          >
-            <Link className="w-3.5 h-3.5" />
-            {selectedSide !== null && selectedPoly
-              ? `Asociar nivel al lado ${selectedSide}`
-              : 'Asociar nivel'}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleDisassociateLevel}
-            disabled={
-              toolsLocked ||
-              !selectedLevel ||
-              (selectedLevel.asociaciones || []).length === 0
-            }
-            className="px-3 py-1.5 rounded text-xs border bg-white hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            <Unlink className="w-3.5 h-3.5" />
-            Desasociar
-          </button>
-
-          <div className="flex-1" />
-
-          {/* ---------- LEYENDA ---------- */}
-
-          <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-500">
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: COLORS.levelLinked }} />
-              Nivel asociado
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: COLORS.levelFree }} />
-              Nivel sin asociar
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: COLORS.polySelected }} />
-              Seleccionado
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-1 rounded-sm" style={{ background: COLORS.sideSelected }} />
-              Lado elegido
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-1 rounded-sm" style={{ background: COLORS.sideLinked }} />
-              Lado con nivel
-            </span>
-          </div>
-
-        </div>
-
-      </div>
-
-
-      {/* ====================================================
-          INSTRUCCIÓN
-      ==================================================== */}
-
-      {mode ? (
-
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-800">
-
+        <div className="flex-1 min-w-[240px]">
           {mode === 'triangle' && (
             <>
-              <strong>Triángulo:</strong> haga clic en 3 puntos del plano (
-              {draft?.points.length ?? 0}/3). La superficie se creará
-              automáticamente. Esc cancela.
+              <strong>Triángulo:</strong> haga clic en 3 puntos del plano. Se
+              crea automáticamente al marcar el tercero.
             </>
           )}
 
           {mode === 'rectangle' && (
             <>
               <strong>Rectángulo:</strong> haga clic en una esquina y luego en
-              la esquina opuesta ({draft?.points.length ?? 0}/2). Esc cancela.
+              la esquina opuesta.
             </>
           )}
 
           {mode === 'level' && (
             <>
-              <strong>Nivel:</strong> haga clic sobre el punto donde desea
-              colocarlo. Si hay una superficie cerca se asocia sola a su lado
-              más cercano. Esc cancela.
+              <strong>Nivel:</strong> haga clic donde quiere colocarlo. Si hay
+              una superficie cerca, se asocia sola a su lado más cercano.
             </>
           )}
 
           {mode === 'vertex' && (
             <>
               <strong>Agregar vértice:</strong> haga clic sobre un lado de la
-              superficie seleccionada; puede agregar varios. Presione «Listo» o
-              Esc para terminar.
+              superficie seleccionada. Puede agregar varios.
             </>
           )}
 
+          {!mode && (
+            <>
+              Seleccione una superficie o un nivel con un clic. Arrastre un
+              vértice para moverlo, o use la paleta de la izquierda para
+              agregar elementos.
+            </>
+          )}
         </div>
 
-      ) : (
+        {/* Progreso de puntos del triángulo / rectángulo */}
+        {(mode === 'triangle' || mode === 'rectangle') && (
+          <div className="flex items-center gap-1.5" aria-hidden="true">
+            {Array.from({ length: mode === 'triangle' ? 3 : 2 }).map((_, i) => (
+              <span
+                key={i}
+                className={`w-2.5 h-2.5 rounded-full transition-colors ${i < (draft?.points.length ?? 0)
+                    ? 'bg-emerald-500'
+                    : 'bg-blue-200'
+                  }`}
+              />
+            ))}
+          </div>
+        )}
 
-        <div className="text-[11px] text-gray-500">
-          Clic en una superficie: la selecciona y marca su lado más cercano ·
-          clic en un nivel: lo selecciona · arrastre un vértice para moverlo ·
-          doble clic sobre el borde de la superficie seleccionada: agrega un
-          vértice · doble clic sobre un vértice: lo elimina · doble clic en un
-          nivel: cambia su valor.
-        </div>
+        {mode && (
+          <button
+            type="button"
+            onClick={cancelMode}
+            className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-white border border-blue-200 text-blue-800 hover:bg-blue-100 flex items-center gap-1 transition"
+          >
+            {mode === 'vertex' ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5" /> Listo
+              </>
+            ) : (
+              <>
+                <X className="w-3.5 h-3.5" /> Cancelar
+              </>
+            )}
+            <Kbd>Esc</Kbd>
+          </button>
+        )}
 
-      )}
+        {busy && (
+          <span className="text-xs text-gray-500 flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Guardando...
+          </span>
+        )}
+      </div>
 
 
       {/* ====================================================
-          CANVAS
+          CANVAS + HERRAMIENTAS FLOTANTES
       ==================================================== */}
 
       <div
         ref={containerRef}
-        className="relative bg-slate-50 border border-gray-300 rounded-md flex items-center justify-center overflow-hidden"
-        style={{ minHeight: stageDimensions.height }}
+        className="relative bg-slate-50 border border-gray-300 rounded-xl flex items-center justify-center overflow-hidden"
+        style={{
+          minHeight: stageDimensions.height,
+          backgroundImage:
+            'radial-gradient(circle, #cbd5e1 1px, transparent 1px)',
+          backgroundSize: '22px 22px',
+        }}
       >
+
+        {/* ---------- PALETA DE HERRAMIENTAS ---------- */}
+
+        <div className="absolute left-3 top-3 z-20 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur rounded-xl border border-gray-200 shadow-lg">
+
+          <ToolButton
+            icon={MousePointer2}
+            label="Seleccionar y mover"
+            shortcut="V"
+            active={!mode}
+            onClick={cancelMode}
+          />
+
+          <div className="h-px bg-gray-200 mx-1.5 my-0.5" />
+
+          <ToolButton
+            icon={Triangle}
+            label="Dibujar triángulo"
+            shortcut="T"
+            active={mode === 'triangle'}
+            disabled={busy}
+            onClick={() => toggleSurfaceTool('triangle')}
+          />
+
+          <ToolButton
+            icon={Square}
+            label="Dibujar rectángulo"
+            shortcut="R"
+            active={mode === 'rectangle'}
+            disabled={busy}
+            onClick={() => toggleSurfaceTool('rectangle')}
+          />
+
+          <ToolButton
+            icon={Ruler}
+            label="Agregar nivel"
+            shortcut="N"
+            active={mode === 'level' || levelDialog?.kind === 'create'}
+            disabled={toolsLocked || !idModelo2D}
+            onClick={() => (mode === 'level' ? cancelMode() : openCreateLevel())}
+          />
+
+        </div>
+
+
+        {/* ---------- AVISOS (error / info) ---------- */}
+
+        {(error || info) && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 w-full max-w-lg px-16 pointer-events-none">
+            <div
+              role={error ? 'alert' : 'status'}
+              className={`pointer-events-auto animate-fade-in flex items-start gap-2 p-3 rounded-lg border shadow-lg text-xs ${error
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-blue-50 border-blue-200 text-blue-900'
+                }`}
+            >
+              {error ? (
+                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              ) : (
+                <Info className="w-4 h-4 text-brand-blue shrink-0 mt-0.5" />
+              )}
+
+              <span className="flex-1">{error || info}</span>
+
+              <button
+                type="button"
+                onClick={() => (error ? setError(null) : setInfo(null))}
+                className="opacity-60 hover:opacity-100 transition"
+                aria-label="Cerrar aviso"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+
+        {/* ---------- INSPECTOR CONTEXTUAL ---------- */}
+
+        {(selectedPoly || selectedLevel) && (
+          <aside className="absolute right-3 top-3 z-20 w-72 max-h-[calc(100%-5.5rem)] overflow-y-auto bg-white/95 backdrop-blur rounded-xl border border-gray-200 shadow-lg divide-y divide-gray-100 text-xs">
+
+            {selectedPoly && (
+              <section className="p-3 space-y-3">
+
+                <header className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-gray-800 flex items-center gap-1.5">
+                      <Square className="w-3.5 h-3.5 text-fuchsia-500" />
+                      Superficie
+                    </div>
+                    <div className="text-[11px] text-gray-500 truncate">
+                      {selectedPoly.id}
+                      {selectedPoly.tipo ? ` · ${selectedPoly.tipo}` : ''}
+                      {' · '}
+                      {(selectedPoly.puntos || []).length} vértices
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="text-gray-400 hover:text-gray-700 transition"
+                    aria-label="Deseleccionar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </header>
+
+                <div
+                  className={`rounded-md px-2.5 py-1.5 text-[11px] flex items-start gap-1.5 ${slopeDefined
+                      ? 'bg-emerald-50 text-emerald-800'
+                      : 'bg-amber-50 text-amber-800'
+                    }`}
+                >
+                  {slopeDefined ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  )}
+                  {pendienteText(selectedPoly)}
+                </div>
+
+                {/* Selector de lado */}
+                <div>
+                  <div className="text-[11px] text-gray-500 mb-1.5">
+                    Lado elegido
+                  </div>
+
+                  <div className="flex flex-wrap gap-1">
+                    {(selectedPoly.puntos || []).map((_, i) => {
+                      const chosen = selectedSide === i;
+                      const linked = linkedSides.has(i);
+
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setSelectedSide(chosen ? null : i)}
+                          title={
+                            linked
+                              ? `Nivel: ${linkedSides.get(i).join(' / ')}`
+                              : `Lado ${i}`
+                          }
+                          className={`min-w-[30px] px-1.5 py-1 rounded-md text-[11px] font-medium border transition ${chosen
+                              ? 'bg-amber-500 border-amber-500 text-white'
+                              : linked
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                          L{i}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {(selectedPoly.niveles || []).length > 0 && (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-gray-500">
+                        <th className="font-medium pr-2 pb-1">Lado</th>
+                        <th className="font-medium pr-2 pb-1">Nivel</th>
+                        <th className="font-medium pb-1">Rol</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-gray-700">
+                      {(selectedPoly.niveles || []).map((n) => (
+                        <tr key={`${n.id}-${n.lado}`}>
+                          <td className="pr-2">{n.lado}</td>
+                          <td className="pr-2">{n.texto ?? n.valor}</td>
+                          <td>{roleOf(selectedPoly, n.id)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <ActionButton
+                    icon={Plus}
+                    active={mode === 'vertex'}
+                    disabled={busy || (!!mode && mode !== 'vertex')}
+                    onClick={toggleVertexMode}
+                    title="Haga clic sobre un lado de la superficie para insertar un vértice"
+                  >
+                    Agregar vértice
+                  </ActionButton>
+
+                  <ActionButton
+                    icon={Minus}
+                    disabled={toolsLocked || !!mode || selectedVertex === null}
+                    onClick={() => handleRemoveVertex(selectedPoly, selectedVertex)}
+                    title="Seleccione un vértice con un clic, o haga doble clic sobre él"
+                  >
+                    {selectedVertex !== null
+                      ? `Quitar vértice ${selectedVertex}`
+                      : 'Quitar vértice'}
+                  </ActionButton>
+                </div>
+
+                <ActionButton
+                  icon={Trash2}
+                  variant="danger"
+                  disabled={toolsLocked || !!mode}
+                  onClick={handleDeletePolygon}
+                >
+                  Eliminar superficie
+                </ActionButton>
+
+              </section>
+            )}
+
+            {selectedLevel && (
+              <section className="p-3 space-y-3">
+
+                <header className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[13px] font-semibold text-gray-800 flex items-center gap-1.5">
+                      <Ruler className="w-3.5 h-3.5 text-amber-600" />
+                      Nivel {selectedLevel.texto ?? selectedLevel.valor}
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      {selectedLevel.origen === 'manual'
+                        ? 'Creado manualmente'
+                        : 'Reconocido del plano'}
+                    </div>
+                  </div>
+
+                  {!selectedPoly && (
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="text-gray-400 hover:text-gray-700 transition"
+                      aria-label="Deseleccionar"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </header>
+
+                {(selectedLevel.asociaciones || []).length === 0 ? (
+                  <div className="rounded-md px-2.5 py-1.5 text-[11px] bg-amber-50 text-amber-800">
+                    Sin asociar: no genera pendiente hasta que se asocie a un
+                    lado de una superficie.
+                  </div>
+                ) : (
+                  <ul className="space-y-1">
+                    {(selectedLevel.asociaciones || []).map((a) => (
+                      <li
+                        key={`${a.id_poligono}-${a.lado}`}
+                        className="flex items-center gap-1.5 text-gray-700"
+                      >
+                        <Link className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span className="truncate">
+                          {a.id_poligono} · lado {a.lado}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {selectedPoly ? (
+                  <button
+                    type="button"
+                    onClick={handleAssociateLevel}
+                    disabled={toolsLocked || !!mode}
+                    className="w-full px-3 py-2 rounded-md bg-brand-blue hover:bg-brand-hover text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <Link className="w-3.5 h-3.5" />
+                    {selectedSide !== null
+                      ? `Asociar al lado ${selectedSide}`
+                      : 'Asociar al lado más cercano'}
+                  </button>
+                ) : (
+                  <div className="text-[11px] text-gray-500">
+                    Para asociarlo, seleccione también una superficie.
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <ActionButton
+                    icon={Pencil}
+                    disabled={toolsLocked || !!mode}
+                    onClick={() => openEditLevel(selectedLevel)}
+                  >
+                    Editar valor
+                  </ActionButton>
+
+                  <ActionButton
+                    icon={Unlink}
+                    disabled={
+                      toolsLocked ||
+                      !!mode ||
+                      (selectedLevel.asociaciones || []).length === 0
+                    }
+                    onClick={handleDisassociateLevel}
+                  >
+                    Desasociar
+                  </ActionButton>
+                </div>
+
+                <ActionButton
+                  icon={Trash2}
+                  variant="danger"
+                  disabled={toolsLocked || !!mode}
+                  onClick={handleDeleteLevel}
+                >
+                  Eliminar nivel
+                </ActionButton>
+
+              </section>
+            )}
+
+          </aside>
+        )}
+
+
+        {/* ---------- ZOOM / VISTA ---------- */}
+
+        <div className="absolute right-3 bottom-3 z-20 flex items-center gap-0.5 p-1 bg-white/95 backdrop-blur rounded-xl border border-gray-200 shadow-lg">
+
+          <IconButton icon={ZoomOut} label="Alejar" onClick={() => zoomFromCenter(1 / 1.25)} />
+
+          <button
+            type="button"
+            onClick={resetView}
+            title="Ajustar a la pantalla (F)"
+            className="min-w-[48px] px-1 h-8 rounded-md text-[11px] font-semibold text-gray-700 hover:bg-blue-50 transition tabular-nums"
+          >
+            {Math.round(view.zoom * 100)}%
+          </button>
+
+          <IconButton icon={ZoomIn} label="Acercar" onClick={() => zoomFromCenter(1.25)} />
+
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
+          <IconButton icon={Scan} label="Ajustar a la pantalla (F)" onClick={resetView} />
+
+          <IconButton
+            icon={isFullscreen ? Minimize : Maximize}
+            label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            onClick={toggleFullscreen}
+          />
+
+        </div>
+
+
+        {/* ---------- LEYENDA ---------- */}
+
+        <div className="absolute left-3 bottom-3 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 max-w-[60%] bg-white/90 backdrop-blur rounded-xl border border-gray-200 shadow text-[11px] text-gray-600">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ background: COLORS.levelLinked }} />
+            Nivel asociado
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ background: COLORS.levelFree }} />
+            Sin asociar
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ background: COLORS.polySelected }} />
+            Seleccionado
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-1 rounded-sm" style={{ background: COLORS.sideSelected }} />
+            Lado elegido
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-1 rounded-sm" style={{ background: COLORS.sideLinked }} />
+            Lado con nivel
+          </span>
+        </div>
+
+
+        {/* ---------- CONTENIDO ---------- */}
 
         {loading ? (
 
@@ -1783,13 +2081,14 @@ export const GeometriaViewer = ({
             {/* Con geometría vacía el Stage sigue activo para poder dibujar. */}
             {isEmptyGeometry && !mode && !draft && (
               <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-                <div className="flex flex-col items-center justify-center py-8 px-6 text-center text-amber-800 bg-amber-50/90 rounded-lg max-w-md border border-amber-200">
+                <div className="flex flex-col items-center justify-center py-8 px-6 text-center text-amber-800 bg-amber-50/95 rounded-xl max-w-md border border-amber-200 shadow-sm">
                   <HelpCircle className="w-10 h-10 text-amber-500 mb-2" />
                   <h4 className="font-semibold text-sm">
                     No se reconoció geometría
                   </h4>
                   <p className="text-xs text-gray-600 mt-1">
-                    Puede crear un triángulo o un rectángulo manualmente.
+                    Dibuje un triángulo (T) o un rectángulo (R) desde la
+                    paleta de la izquierda para empezar.
                   </p>
                 </div>
               </div>
@@ -1802,15 +2101,14 @@ export const GeometriaViewer = ({
               onMouseDown={handlePointerDown}
               onMouseMove={handlePointerMove}
               onMouseUp={handlePointerUp}
+              onMouseLeave={handlePointerUp}
               onClick={handleStageClick}
-              style={{ cursor: mode ? 'crosshair' : 'default' }}
+              style={{ cursor: canvasCursor }}
             >
 
               <Layer>
 
-                {/* =============================================
-                    LÍNEAS DE FONDO (solo dibujo, sin eventos)
-                ============================================= */}
+                {/* ---- LÍNEAS DE FONDO (solo dibujo, sin eventos) ---- */}
 
                 {lineas.map((line, index) => {
                   const [x1, y1, x2, y2] = getLinePoints(line);
@@ -1828,47 +2126,9 @@ export const GeometriaViewer = ({
                     />
                   );
                 })}
-                {/* =============================================
-                    TANQUE
-                ============================================= */}
-
-                {/* {tank && (
-                  (() => {
-                    const tx = Number(tank.x ?? 0);
-                    const ty = Number(tank.y ?? 0);
-                    const width = Number(tank.width ?? 0);
-                    const depth = Number(tank.depth ?? 0);
-
-                    const x1 = tx - width / 2;
-                    const y1 = ty - depth / 2;
-                    const x2 = tx + width / 2;
-                    const y2 = ty + depth / 2;
-
-                    const [sx1, sy1] = transformPoint(x1, y1);
-                    const [sx2, sy2] = transformPoint(x2, y2);
-
-                    return (
-                      <Line
-                        points={[
-                          sx1, sy1,
-                          sx2, sy1,
-                          sx2, sy2,
-                          sx1, sy2,
-                        ]}
-                        closed
-                        fill="#38bdf833"
-                        stroke="#0284c7"
-                        strokeWidth={2}
-                        listening={false}
-                      />
-                    );
-                  })()
-                )} */}
 
 
-                {/* =============================================
-                    POLÍGONOS
-                ============================================= */}
+                {/* ---- POLÍGONOS ---- */}
 
                 {orderedPolys.map((poly) => {
                   const points = normalizePoints(poly.puntos);
@@ -1881,6 +2141,11 @@ export const GeometriaViewer = ({
                     selectedPolyId !== null &&
                     String(selectedPolyId) === String(poly.id);
 
+                  const isHover =
+                    !isSelected &&
+                    hoverPolyId !== null &&
+                    String(hoverPolyId) === String(poly.id);
+
                   const stroke = isSelected
                     ? COLORS.polySelected
                     : COLORS.poly;
@@ -1891,11 +2156,19 @@ export const GeometriaViewer = ({
                       <Line
                         points={screenPoints}
                         closed
-                        fill={isSelected ? '#d946ef33' : '#1a6dba22'}
+                        fill={
+                          isSelected
+                            ? '#d946ef33'
+                            : isHover
+                              ? '#1a6dba44'
+                              : '#1a6dba22'
+                        }
                         stroke={stroke}
-                        strokeWidth={isSelected ? 3 : 2}
+                        strokeWidth={isSelected ? 3 : isHover ? 2.5 : 2}
                         hitStrokeWidth={10}
                         listening={!mode}
+                        onMouseEnter={() => hoverOn(poly.id)}
+                        onMouseLeave={hoverOff}
                         onClick={(e) => handlePolygonClick(e, poly)}
                         onDblClick={(e) => {
                           e.cancelBubble = true;
@@ -1953,8 +2226,8 @@ export const GeometriaViewer = ({
                                   y={-7}
                                   width={w}
                                   height={14}
-                                  fill="#ffffffdd"
-                                  cornerRadius={2}
+                                  fill={chosen ? '#fef3c7' : '#ffffffdd'}
+                                  cornerRadius={3}
                                 />
                                 <Text
                                   text={label}
@@ -1987,12 +2260,15 @@ export const GeometriaViewer = ({
                             key={`vertex-${poly.id}-${vertexIndex}`}
                             x={sx}
                             y={sy}
-                            radius={vertexSelected ? 7 : 5}
+                            radius={vertexSelected ? 7 : isSelected ? 5.5 : 4}
                             fill={vertexSelected ? COLORS.sideSelected : stroke}
                             stroke="#fff"
                             strokeWidth={1.5}
+                            opacity={isSelected || isHover ? 1 : 0.75}
                             draggable
                             listening={!mode}
+                            onMouseEnter={() => hoverOn(poly.id)}
+                            onMouseLeave={hoverOff}
                             onClick={(e) => {
                               e.cancelBubble = true;
 
@@ -2035,9 +2311,7 @@ export const GeometriaViewer = ({
                 })}
 
 
-                {/* =============================================
-                    SUPERFICIE EN CREACIÓN
-                ============================================= */}
+                {/* ---- SUPERFICIE EN CREACIÓN ---- */}
 
                 {previewPoints.length > 0 && (
                   <Group listening={false}>
@@ -2063,6 +2337,8 @@ export const GeometriaViewer = ({
                           y={sy}
                           radius={5}
                           fill={COLORS.draft}
+                          stroke="#fff"
+                          strokeWidth={1.5}
                         />
                       );
                     })}
@@ -2071,9 +2347,7 @@ export const GeometriaViewer = ({
                 )}
 
 
-                {/* =============================================
-                    CONEXIÓN NIVEL → LADO ASOCIADO
-                ============================================= */}
+                {/* ---- CONEXIÓN NIVEL → LADO ASOCIADO ---- */}
 
                 {cotasAltura.flatMap((level) => {
                   const [lx, ly] = getLevelPosition(level);
@@ -2125,9 +2399,7 @@ export const GeometriaViewer = ({
                 })}
 
 
-                {/* =============================================
-                    NIVELES
-                ============================================= */}
+                {/* ---- NIVELES ---- */}
 
                 {cotasAltura.map((level) => {
                   const [x, y] = getLevelPosition(level);
@@ -2159,6 +2431,8 @@ export const GeometriaViewer = ({
                       x={sx}
                       y={sy}
                       listening={!mode}
+                      onMouseEnter={() => hoverOn(null)}
+                      onMouseLeave={hoverOff}
                       onClick={(e) => {
                         e.cancelBubble = true;
 
@@ -2169,7 +2443,7 @@ export const GeometriaViewer = ({
                       onDblClick={(e) => {
                         e.cancelBubble = true;
 
-                        handleUpdateLevel(level);
+                        openEditLevel(level);
                       }}
                     >
 
@@ -2180,8 +2454,12 @@ export const GeometriaViewer = ({
                         height={h}
                         fill={fill}
                         stroke="#fff"
-                        strokeWidth={1}
-                        cornerRadius={3}
+                        strokeWidth={isSelected ? 2 : 1}
+                        cornerRadius={4}
+                        shadowColor="#0f172a"
+                        shadowBlur={isSelected ? 8 : 4}
+                        shadowOpacity={0.25}
+                        shadowOffsetY={1}
                       />
 
                       <Text
@@ -2213,146 +2491,42 @@ export const GeometriaViewer = ({
 
 
       {/* ====================================================
-          DETALLE DE LA SELECCIÓN
+          RESUMEN + CONFIRMAR
       ==================================================== */}
 
-      <div className="grid gap-3 md:grid-cols-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl px-3.5 py-3 shadow-sm">
 
-        <div className="bg-gradient-to-br from-blue-50 to-white border border-blue-200 rounded-md p-3 shadow-sm">
+        <StatChip>{poligonos.length} superficies</StatChip>
 
-          <div className="font-semibold text-brand-blue mb-1 flex items-center gap-1.5">
-            <Square className="w-3.5 h-3.5" /> Superficie seleccionada
-          </div>
+        <StatChip tone={linkedLevels === cotasAltura.length && cotasAltura.length > 0 ? 'good' : 'neutral'}>
+          {cotasAltura.length} niveles ({linkedLevels} asociados)
+        </StatChip>
 
-          {!selectedPoly ? (
-            <div className="text-gray-500">
-              Haga clic sobre una superficie.
-            </div>
-          ) : (
-            <div className="space-y-1 text-gray-600">
+        <StatChip title="Líneas de referencia del plano">
+          {lineas.length} líneas
+        </StatChip>
 
-              <div>
-                <span className="text-gray-500">ID:</span> {selectedPoly.id}
-                {selectedPoly.tipo ? ` · ${selectedPoly.tipo}` : ''}
-                {' · '}
-                {(selectedPoly.puntos || []).length} vértices
-              </div>
+        <StatChip>{capas.length} capas</StatChip>
 
-              <div>
-                <span className="text-gray-500">Lado elegido:</span>{' '}
-                {selectedSide !== null ? selectedSide : 'ninguno'}
-                {' · '}
-                <span className="text-gray-500">Pendiente:</span>{' '}
-                {pendienteText(selectedPoly)}
-              </div>
+        {withoutSlope > 0 && (
+          <StatChip
+            tone="warn"
+            title="Cada superficie necesita dos niveles asociados a lados distintos"
+          >
+            {withoutSlope} sin pendiente
+          </StatChip>
+        )}
 
-              {(selectedPoly.niveles || []).length === 0 ? (
-                <div className="text-gray-500">Sin niveles asociados.</div>
-              ) : (
-                <table className="w-full mt-1">
-                  <thead>
-                    <tr className="text-left text-gray-500">
-                      <th className="font-medium pr-2">Lado</th>
-                      <th className="font-medium pr-2">Nivel</th>
-                      <th className="font-medium">Rol</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(selectedPoly.niveles || []).map((n) => (
-                      <tr key={`${n.id}-${n.lado}`}>
-                        <td className="pr-2">{n.lado}</td>
-                        <td className="pr-2">{n.texto ?? n.valor}</td>
-                        <td>{roleOf(selectedPoly, n.id)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-
-            </div>
-          )}
-
-        </div>
-
-        <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-md p-3 shadow-sm">
-
-          <div className="font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
-            <Ruler className="w-3.5 h-3.5" /> Nivel seleccionado
-          </div>
-
-          {!selectedLevel ? (
-            <div className="text-gray-500">Haga clic sobre un nivel.</div>
-          ) : (
-            <div className="space-y-1 text-gray-600">
-
-              <div>
-                <strong>{selectedLevel.texto ?? selectedLevel.valor}</strong>
-                {' · '}
-                {selectedLevel.origen === 'manual'
-                  ? 'creado manualmente'
-                  : 'reconocido del plano'}
-              </div>
-
-              {(selectedLevel.asociaciones || []).length === 0 ? (
-                <div className="text-amber-700">
-                  Sin asociar: no genera pendiente hasta que se asocie a un
-                  lado de una superficie.
-                </div>
-              ) : (
-                (selectedLevel.asociaciones || []).map((a) => (
-                  <div key={`${a.id_poligono}-${a.lado}`}>
-                    Asociado a {a.id_poligono} · lado {a.lado}
-                  </div>
-                ))
-              )}
-
-            </div>
-          )}
-
-        </div>
-
-      </div>
-
-
-      {/* ====================================================
-          INFORMACIÓN
-      ==================================================== */}
-
-      <div className="text-xs text-gray-600 flex flex-wrap gap-4">
-
-        <span>
-          Superficies: <strong>{poligonos.length}</strong>
-        </span>
-
-        <span>
-          Líneas: <strong>{lineas.length}</strong>
-        </span>
-
-        <span>
-          Niveles: <strong>{cotasAltura.length}</strong>
-          {' '}(
-          {cotasAltura.filter((l) => (l.asociaciones || []).length > 0).length}
-          {' '}asociados)
-        </span>
-
-        <span>
-          Capas: <strong>{capas.length}</strong>
-        </span>
-
-      </div>
-
-
-      {/* ====================================================
-          CONFIRMAR
-      ==================================================== */}
-
-      <div className="flex justify-end gap-3 pt-2">
+        <div className="flex-1" />
 
         <button
           type="button"
           onClick={handleConfirmGeometry}
           disabled={busy || !idModelo2D}
-          className="px-5 py-2 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center gap-1.5 disabled:opacity-50"
+          className={`px-5 py-2.5 font-bold rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50 ${isValidated
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+              : 'bg-brand-blue hover:bg-brand-hover text-white'
+            }`}
         >
           {saving ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -2360,7 +2534,7 @@ export const GeometriaViewer = ({
             <CheckCircle className="w-4 h-4" />
           )}
 
-          {isValidated ? 'Geometría Confirmada ✓' : 'Confirmar Geometría'}
+          {isValidated ? 'Geometría confirmada' : 'Confirmar geometría'}
         </button>
 
         {isValidated && (
@@ -2368,14 +2542,125 @@ export const GeometriaViewer = ({
             type="button"
             onClick={handleGenerate3D}
             disabled={busy || !idModelo2D}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded text-xs flex items-center gap-1.5 disabled:opacity-50"
+            className="animate-fade-in px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
           >
-            {generating && <Loader2 className="w-4 h-4 animate-spin" />}
-            {generating ? 'Generando 3D...' : 'Siguiente paso (Modelo 3D) →'}
+            {generating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : null}
+            {generating ? 'Generando 3D...' : 'Siguiente paso: Modelo 3D'}
+            {!generating && <ArrowRight className="w-4 h-4" />}
           </button>
         )}
 
       </div>
+
+
+      {/* ====================================================
+          DIÁLOGO: VALOR DEL NIVEL
+      ==================================================== */}
+
+      {levelDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setLevelDialog(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Valor del nivel"
+            className="animate-fade-in w-full max-w-sm bg-white rounded-xl shadow-2xl border border-gray-200 p-5 space-y-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <Ruler className="w-5 h-5" />
+              </div>
+
+              <div>
+                <h3 className="font-semibold text-sm text-gray-900">
+                  {levelDialog.kind === 'create'
+                    ? 'Nuevo nivel'
+                    : 'Editar nivel'}
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {levelDialog.kind === 'create'
+                    ? 'Escriba la cota y luego haga clic en el plano para ubicarla.'
+                    : 'Escriba el nuevo valor de la cota.'}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="nivel-valor"
+                className="block text-xs font-medium text-gray-700 mb-1.5"
+              >
+                Valor (en metros)
+              </label>
+
+              <input
+                id="nivel-valor"
+                autoFocus
+                type="text"
+                inputMode="decimal"
+                placeholder="+7.90"
+                value={levelDialog.value}
+                onChange={(e) =>
+                  setLevelDialog({
+                    ...levelDialog,
+                    value: e.target.value,
+                    error: '',
+                  })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    confirmLevelDialog();
+                  }
+                }}
+                className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 transition ${levelDialog.error
+                    ? 'border-red-300 focus:ring-red-200'
+                    : 'border-gray-300 focus:ring-blue-200 focus:border-brand-blue'
+                  }`}
+              />
+
+              <div className="mt-1.5 text-[11px] min-h-[16px]">
+                {levelDialog.error ? (
+                  <span className="text-red-600">{levelDialog.error}</span>
+                ) : levelPreview ? (
+                  <span className="text-gray-500">
+                    Se mostrará como{' '}
+                    <strong className="text-gray-800">{levelPreview}</strong>
+                  </span>
+                ) : (
+                  <span className="text-gray-400">
+                    Acepta +7.90, 7,9, -1.20 o 7.9 m
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setLevelDialog(null)}
+                className="px-4 py-2 rounded-lg text-xs font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 transition"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmLevelDialog}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand-blue hover:bg-brand-hover text-white transition"
+              >
+                {levelDialog.kind === 'create' ? 'Continuar' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
