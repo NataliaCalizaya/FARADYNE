@@ -1,26 +1,22 @@
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from sqlalchemy import Column, Integer, Boolean, ForeignKey, text
+from sqlalchemy.dialects.postgresql import JSONB
+
+from .base import Base
 
 
-# @dataclass
-# class Modelo2D:
-#     id_modelo2d: Optional[int] = None
-#     poligonos: List[Dict[str, Any]] = field(default_factory=list)
-#     lineas: List[Dict[str, Any]] = field(default_factory=list)
-#     capas: List[str] = field(default_factory=list)
-#     colores: List[Dict[str, Any]] = field(default_factory=list)
-#     cotas_altura: List[Dict[str, Any]] = field(default_factory=list)
-#     validado: bool = False
-#     id_plano: Optional[int] = None
-@dataclass
-class Modelo2D:
+class Modelo2D(Base):
+    __tablename__ = 'modelo2d'
 
-    id_modelo2d: Optional[int] = None
-    poligonos: List[Dict[str, Any]] = field(default_factory=list)
-    lineas: List[Dict[str, Any]] = field(default_factory=list)
-    capas: List[Dict[str, Any]] = field(default_factory=list)
-    colores: List[Dict[str, Any]] = field(default_factory=list)
-    cotas_altura: List[Dict[str, Any]] = field(default_factory=list)
-    validado: bool = False
-    id_plano: Optional[int] = None
-
+    id_modelo2d = Column(Integer, primary_key=True, autoincrement=True)
+    poligonos = Column(JSONB, nullable=True)
+    lineas = Column(JSONB, nullable=True)
+    capas = Column(JSONB, nullable=True)
+    colores = Column(JSONB, nullable=True)
+    cotas_altura = Column(JSONB, nullable=True)
+    validado = Column(Boolean, nullable=False, server_default=text('false'))
+    id_plano = Column(
+        Integer,
+        ForeignKey('plano.id_plano', ondelete='CASCADE'),
+        nullable=False,
+        unique=True,  # relación 1:1 con plano
+    )

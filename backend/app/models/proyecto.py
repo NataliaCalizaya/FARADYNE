@@ -1,18 +1,19 @@
-from dataclasses import dataclass
-from datetime import date
-from typing import Optional
+from sqlalchemy import Column, Integer, String, Text, Date, func
 
-@dataclass
-class Proyecto:
-    id_proyecto: Optional[int] = None
-    nombre: str = ""
-    cliente: Optional[str] = None
-    descripcion: Optional[str] = None
-    ubicacion: Optional[str] = None
-    departamento: Optional[str] = None
-    provincia: Optional[str] = None
-    localidad: Optional[str] = None
-    estado: str = "borrador"
-    fecha_creacion: Optional[date] = None
-    fecha_del_proyecto: Optional[date] = None
+from .base import Base
 
+
+class Proyecto(Base):
+    __tablename__ = 'proyecto'
+
+    id_proyecto = Column(Integer, primary_key=True, autoincrement=True)
+    nombre = Column(String(150), nullable=False)
+    cliente = Column(String(150), nullable=False)
+    ubicacion = Column(String(250), nullable=False)
+    fecha_creacion = Column(Date, nullable=False, server_default=func.current_date())
+    descripcion = Column(Text, nullable=True)
+    departamento = Column(String(150), nullable=True)
+    provincia = Column(String(150), nullable=True)
+    localidad = Column(String(150), nullable=True)
+    estado = Column(String(50), nullable=True, server_default='borrador')
+    fecha_del_proyecto = Column(Date, nullable=True)

@@ -1,14 +1,23 @@
-from dataclasses import dataclass
-from typing import Optional
+from sqlalchemy import Column, Integer, Float, String, ForeignKey, Index
+
+from .base import Base
 
 
-@dataclass
-class Mastil:
-    id_mastil: Optional[int] = None
-    posicion_x: float = 0.0
-    posicion_y: float = 0.0
-    posicion_z: float = 0.0
-    altura: float = 0.0
-    tipo: str = "Franklin"
-    id_modelo2d: Optional[int] = None
+class Mastil(Base):
+    __tablename__ = 'mastil'
+    __table_args__ = (
+        Index('idx_mastil_modelo3d', 'id_modelo2d'),
+    )
 
+    id_mastil = Column(Integer, primary_key=True, autoincrement=True)
+    posicion_x = Column(Float, nullable=False)
+    posicion_y = Column(Float, nullable=False)
+    altura = Column(Float, nullable=False)
+    tipo = Column(String(50), nullable=False)
+    id_modelo2d = Column(
+        Integer,
+        ForeignKey('modelo2d.id_modelo2d', onupdate='CASCADE', ondelete='CASCADE'),
+        nullable=False,
+    )
+    posicion_z = Column(Float, nullable=True)
+    radio_cobertura = Column(Float, nullable=True)

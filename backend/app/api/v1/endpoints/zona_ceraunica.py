@@ -1,6 +1,9 @@
 from typing import List
-from fastapi import APIRouter, Query
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
 from app.repositories.zona_ceraunica_repository import ZonaCeraunicaRepository
 
 router = APIRouter(prefix="/zonas-ceraunicas", tags=["Zonas Ceráunicas"])
@@ -8,9 +11,10 @@ router = APIRouter(prefix="/zonas-ceraunicas", tags=["Zonas Ceráunicas"])
 
 @router.get("/localidades", response_model=List[str])
 def buscar_localidades(
-    q: str = Query(..., min_length=1, description="Prefijo a buscar, ej: 'M'")
+    q: str = Query(..., min_length=1, description="Prefijo a buscar, ej: 'M'"),
+    db: Session = Depends(get_db),
 ) -> List[str]:
     """Autocomplete de localidades para el campo 'Localidad' del formulario
     de Datos del Proyecto. Devuelve ciudades de `zona_ceraunica` que
     empiezan con `q`."""
-    return ZonaCeraunicaRepository.buscar_localidades(q)
+    return ZonaCeraunicaRepository.buscar_localidades(db, q)
