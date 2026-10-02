@@ -1,3 +1,4 @@
+from app.models import Base
 import os
 from logging.config import fileConfig
 from pathlib import Path
@@ -13,8 +14,16 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+from app.models.mastil import Mastil
+from app.models.modelo2d import Modelo2D
+from app.models.modelo3d import Modelo3D
+from app.models.plano import Plano
+from app.models.proyecto import Proyecto
+from app.models.nivel_de_proteccion import NivelDeProteccion
+from app.models.resultado_simulacion import ResultadoSimulacion
+from app.models.zona_ceraunica import ZonaCeraunica
 
-from app.models.orm import Base
+# 3. Asignas la metadata al target de Alembic
 target_metadata = Base.metadata
 
 

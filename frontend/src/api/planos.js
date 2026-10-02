@@ -9,6 +9,11 @@ import apiClient from './client';
  *  - Triángulos y rectángulos se CREAN con endpoints distintos, pero una vez
  *    creados son polígonos: se editan, se les agregan/quitan vértices y se
  *    eliminan con los mismos endpoints de /poligonos.
+ *  - Cualquier edición (polígonos, vértices, niveles) deja el Modelo 2D con
+ *    `validado: false`: hay que llamar a validarModelo2D antes de generar el
+ *    Modelo 3D.
+ *  - Los IDs de plano y de Modelo 2D son enteros (número o string numérico).
+ *    Los IDs de polígonos y niveles son strings generados por el backend.
  */
 export const planosApi = {
   // ==========================================================
@@ -16,9 +21,9 @@ export const planosApi = {
   // ==========================================================
 
   /**
-   * Sube un plano (DXF o PDF).
+   * Sube un plano (DXF o PDF). 404 si el proyecto no existe.
    * @param {File} file
-   * @param {string} idProyecto
+   * @param {number|string} idProyecto
    */
   uploadPlano: async (file, idProyecto) => {
     const formData = new FormData();
@@ -35,7 +40,7 @@ export const planosApi = {
   /**
    * Datos completos para dibujar el plano (líneas, capas, polígonos, niveles,
    * bounding_box, id_modelo2d y validado).
-   * @param {string} id - ID del plano
+   * @param {number|string} id - ID del plano
    */
   getPlanoPreview: async (id) => {
     const response = await apiClient.get(`/planos/${id}/preview`);
@@ -49,7 +54,7 @@ export const planosApi = {
   /**
    * Estado editable (poligonos, cotas_altura, capas, validado) sin las
    * líneas de fondo. Se pide después de cada operación de edición.
-   * @param {string} idModelo2D
+   * @param {number|string} idModelo2D
    */
   getModelo2DEdicion: async (idModelo2D, { incluirLineas = false } = {}) => {
     const response = await apiClient.get(`/modelos2d/${idModelo2D}/edicion`, {
@@ -60,7 +65,7 @@ export const planosApi = {
 
   /**
    * Actualización general (compatibilidad).
-   * @param {string} id - ID del Modelo2D
+   * @param {number|string} id - ID del Modelo2D
    * @param {Object} data - { poligonos, lineas, capas, validado }
    */
   updateModelo2D: async (id, data) => {
@@ -68,6 +73,7 @@ export const planosApi = {
     return response.data;
   },
 
+  /** Valida la geometría y marca el Modelo 2D como validado. */
   validarModelo2D: async (idModelo2D) => {
     const response = await apiClient.post(`/modelos2d/${idModelo2D}/validar`);
     return response.data;
