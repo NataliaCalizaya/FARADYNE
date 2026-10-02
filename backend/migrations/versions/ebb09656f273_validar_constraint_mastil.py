@@ -1,7 +1,7 @@
 """validar_constraint_mastil
 
 Revision ID: ebb09656f273
-Revises: 8f1aa9aeda41
+Revises: 28b217cc43d6
 Create Date: 2026-10-01 22:49:56.130028
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'ebb09656f273'
-down_revision: Union[str, Sequence[str], None] = '8f1aa9aeda41'
+down_revision: Union[str, Sequence[str], None] = '28b217cc43d6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

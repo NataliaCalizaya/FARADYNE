@@ -1,4 +1,4 @@
-from app.models import Base
+from app.models.base import Base
 import os
 from logging.config import fileConfig
 from pathlib import Path
