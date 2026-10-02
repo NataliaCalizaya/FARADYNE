@@ -360,8 +360,14 @@ class DXFInterpreterService:
                 if not texto:
                     continue
 
-                if _PDF._is_dimension_layer(capa):
-                    continue  # las cotas de medida no son niveles
+                # Las cotas de medida no son niveles, salvo que el texto
+                # tenga signo: "+7.90" en una capa COTAS sigue siendo una
+                # cota de altura válida, igual que en el intérprete PDF.
+                if _PDF._is_dimension_layer(capa) and not (
+                    _PDF.ACEPTAR_NIVELES_CON_SIGNO_EN_COTAS
+                    and _PDF._texto_tiene_signo(texto)
+                ):
+                    continue
 
                 try:
                     insert = entity.dxf.insert

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Tuple, Callable, Optional
 
 from shapely.geometry import Polygon, MultiPolygon, Point
+from shapely.ops import triangulate
 
 
 # ============================================================
@@ -198,7 +199,19 @@ def extract_region_levels(
         if value is None:
             continue
 
-        x, y = get_level_position(nivel)
+        # Cuando el nivel ya está asociado, el punto proyectado sobre el lado
+        # representa la arista de la cubierta mejor que la posición visual
+        # de su etiqueta. Así la pendiente 3D coincide con los lados que el
+        # usuario validó en el corrector 2D.
+        punto_lado = nivel.get("punto_lado")
+        if isinstance(punto_lado, dict):
+            try:
+                x = float(punto_lado["x"])
+                y = float(punto_lado["y"])
+            except (KeyError, TypeError, ValueError):
+                x, y = get_level_position(nivel)
+        else:
+            x, y = get_level_position(nivel)
 
         result.append(
             {
@@ -590,44 +603,32 @@ def add_prism_with_roof(
         )
 
     # ========================================================
-    # SUPERFICIE SUPERIOR
+    # TAPAS SUPERIOR E INFERIOR
     # ========================================================
+    # Un abanico desde el primer vértice sólo sirve para polígonos convexos.
+    # En una cubierta cóncava atraviesa el exterior y crea los triángulos
+    # "sin sentido" que se veían en el visor. Shapely triangula y luego se
+    # conservan únicamente los triángulos completamente cubiertos por la
+    # huella 2D original.
+    for triangle in triangulate(poly):
+        if not poly.covers(triangle):
+            continue
 
-    for i in range(
-        1,
-        len(top) - 1
-    ):
+        triangle_points = list(triangle.exterior.coords)[:-1]
+        if len(triangle_points) != 3:
+            continue
 
-        faces.append(
-            {
-                "type": "top",
-                "points": [
-                    top[0],
-                    top[i],
-                    top[i + 1],
-                ],
-            }
-        )
+        top_triangle = [
+            (float(x), float(y), float(zfun(x, y)))
+            for x, y in triangle_points
+        ]
+        bottom_triangle = [
+            (float(x), float(y), base)
+            for x, y in triangle_points
+        ]
 
-    # ========================================================
-    # SUPERFICIE INFERIOR
-    # ========================================================
-
-    for i in range(
-        1,
-        len(bot) - 1
-    ):
-
-        faces.append(
-            {
-                "type": "bottom",
-                "points": [
-                    bot[0],
-                    bot[i + 1],
-                    bot[i],
-                ],
-            }
-        )
+        faces.append({"type": "top", "points": top_triangle})
+        faces.append({"type": "bottom", "points": list(reversed(bottom_triangle))})
 
     return {
         "id": region.get("id"),
