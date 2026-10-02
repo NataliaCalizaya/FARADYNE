@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three-stdlib';
 import {
   RefreshCw, Box, Loader2, Maximize2, Minimize2, X,
-  ChevronDown, ChevronUp, AlertTriangle, Crosshair, RotateCw,
+  ChevronDown, ChevronUp, AlertTriangle, Crosshair, RotateCw, Sun, Moon, ZoomIn, ZoomOut
 } from 'lucide-react';
 import { modelos3dApi } from '../../api/modelos3d';
 import { getMastColor } from '../../hooks/utilsMastilVisual';
@@ -163,50 +163,47 @@ function collectLevelLabels(meta) {
   return out;
 }
 
-function makeLabelSprite(text, width) {
+function makeLabelSprite(text, width, darkMode = true) {
   const cv = document.createElement('canvas');
   cv.width = 256;
-  cv.height = 80;
+  cv.height = 96;
   const ctx = cv.getContext('2d');
   if (!ctx) return null;
-
-  ctx.fillStyle = 'rgba(255,255,255,.95)';
+  ctx.fillStyle = darkMode ? 'rgba(15, 23, 42, 0.90)' : 'rgba(255, 255, 255, 0.92)';
   ctx.strokeStyle = '#0284c7';
-  ctx.lineWidth = 4;
-  const r = 16;
+  ctx.lineWidth = 5;
+  const r = 18;
   ctx.beginPath();
-  ctx.moveTo(r, 2);
-  ctx.lineTo(254 - r, 2);
-  ctx.quadraticCurveTo(254, 2, 254, r);
-  ctx.lineTo(254, 78 - r);
-  ctx.quadraticCurveTo(254, 78, 254 - r, 78);
-  ctx.lineTo(r, 78);
-  ctx.quadraticCurveTo(2, 78, 2, 78 - r);
-  ctx.lineTo(2, r);
-  ctx.quadraticCurveTo(2, 2, r, 2);
-  ctx.closePath();
+  ctx.roundRect(4, 4, 248, 88, r);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 40px Arial';
+  ctx.shadowColor = darkMode ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+  ctx.shadowBlur = 4;
+  ctx.fillStyle = darkMode ? '#f8fafc' : '#0f172a';
+  ctx.font = 'bold 42px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 128, 42);
+  ctx.fillText(text, 128, 50);
+
+  const texture = new THREE.CanvasTexture(cv);
+  texture.minFilter = THREE.LinearFilter;
 
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({
-      map: new THREE.CanvasTexture(cv),
+      map: texture,
       transparent: true,
-      depthTest: false,
+      depthTest: true,
+      depthWrite: false,
     })
   );
-  sprite.scale.set(width, (width * 80) / 256, 1);
+
+  sprite.scale.set(width, (width * 96) / 256, 1);
   sprite.renderOrder = 10;
   return sprite;
 }
 
-function buildPrismMesh(prism, tOf, opacity) {
+function buildPrismMesh(prism, tOf, opacity, centerOffset = { x: 0, y: 0 }) {
   if (!prism.faces || prism.faces.length === 0) return null;
 
   const positions = [];
@@ -215,8 +212,9 @@ function buildPrismMesh(prism, tOf, opacity) {
   prism.faces.forEach((face) => {
     const pts = face.points;
     if (!pts || pts.length < 3) return;
-
-    const v = pts.map(toThree);
+    const v = pts.map((p) => 
+      new THREE.Vector3(p[0] - centerOffset.x, p[2], -(p[1] - centerOffset.y))
+    );
     const zTop = Math.max(...pts.map((p) => p[2]));
 
     const colorOf = (p) => {
@@ -255,8 +253,8 @@ function buildPrismMesh(prism, tOf, opacity) {
   mesh.name = prism.id || 'roof_region';
 
   const edge = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geo),
-    new THREE.LineBasicMaterial({ color: COLOR_EDGE, transparent: true, opacity: 0.6 })
+    new THREE.EdgesGeometry(geo, 20),
+    new THREE.LineBasicMaterial({ color: COLOR_EDGE, transparent: true, opacity: 0.8 })
   );
   mesh.add(edge);
 
@@ -316,6 +314,7 @@ export const Modelo3DViewer = ({
   const focusRegionRef = useRef(null);
   const selectedIdRef = useRef(null);
   const requestRef = useRef(0);
+  const centerOffsetRef = useRef({ x: 0, y: 0 });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -337,6 +336,7 @@ export const Modelo3DViewer = ({
 
   // Interacción
   const [selectedId, setSelectedId] = useState(null);
+  const [darkMode, setDarkMode] = useState(true); // true = oscuro, false = claro
   const [tooltip, setTooltip] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [showHint, setShowHint] = useState(true);
@@ -439,6 +439,23 @@ export const Modelo3DViewer = ({
     setView('iso');
     setSelectedId(null);
   };
+  
+  const handleZoom = (factor) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    const offset = camera.position.clone().sub(controls.target);
+
+    const newLength = THREE.MathUtils.clamp(
+      offset.length() * factor,
+      controls.minDistance,
+      controls.maxDistance
+    );
+
+    offset.setLength(newLength);
+    camera.position.copy(controls.target).add(offset);
+    controls.update();
+  };
 
   const toggleFullscreen = () => {
     const el = containerRef.current;
@@ -471,8 +488,10 @@ export const Modelo3DViewer = ({
 
     const cx = (stats.minX + stats.maxX) / 2;
     const cy = (stats.minY + stats.maxY) / 2;
-    const center = new THREE.Vector3(cx, stats.zAll * 0.4, -cy);
+    const centerOffset = { x: cx, y: cy };
+    centerOffsetRef.current = centerOffset;
 
+    const center = new THREE.Vector3(0, stats.zAll * 0.4, 0);
     const range = stats.zMax - stats.zMin;
     const tOf = (z) => (range > 1e-6 ? (z - stats.zMin) / range : 0.5);
 
@@ -497,18 +516,18 @@ export const Modelo3DViewer = ({
     // --- Luces ---
     scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
     const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-    sun.position.set(center.x + size, size * 1.5, center.z + size * 0.5);
+    sun.position.set(size, size * 1.5, size * 0.5);
     sun.target.position.copy(center);
     scene.add(sun);
     scene.add(sun.target);
 
-    // --- Cubiertas ---
+    // --- Cubiertas (centradas) ---
     const roofGroup = new THREE.Group();
     roofGroup.name = 'roofs';
     const meshes = [];
 
     prisms.forEach((prism) => {
-      const mesh = buildPrismMesh(prism, tOf, 0.85);
+      const mesh = buildPrismMesh(prism, tOf, 0.85, centerOffset);
       if (mesh) {
         roofGroup.add(mesh);
         meshes.push(mesh);
@@ -516,82 +535,116 @@ export const Modelo3DViewer = ({
     });
     scene.add(roofGroup);
 
-    // --- Tanque (si el backend lo envía) ---
-    if (metaData.tank) {
-      const t = metaData.tank;
-      const tank = new THREE.Mesh(
-        new THREE.BoxGeometry(t.width, t.top - t.base, t.depth),
-        new THREE.MeshStandardMaterial({
-          color: 0xe07a10, transparent: true, opacity: 0.85, roughness: 0.4,
-        })
-      );
-      tank.position.set(t.x, (t.base + t.top) / 2, -t.y);
-      roofGroup.add(tank);
-    }
-
-    // --- Cotas de nivel ---
-    const labelsGroup = new THREE.Group();
-    labelsGroup.name = 'labels';
-    const labelWidth = Math.min(Math.max(size * 0.045, 1.4), 8);
-    const poleVerts = [];
-
-    collectLevelLabels(metaData).forEach(({ val, x, y }) => {
-      const sprite = makeLabelSprite(formatLevel(val), labelWidth);
-      if (!sprite) return;
-      const yLabel = Math.max(val, 0) + 0.3;
-      sprite.position.set(x, yLabel, -y);
-      labelsGroup.add(sprite);
-      poleVerts.push(x, 0, -y, x, yLabel, -y);
-    });
-
-    if (poleVerts.length) {
-      const poleGeo = new THREE.BufferGeometry();
-      poleGeo.setAttribute('position', new THREE.Float32BufferAttribute(poleVerts, 3));
-      labelsGroup.add(
-        new THREE.LineSegments(
-          poleGeo,
-          new THREE.LineBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.35 })
-        )
-      );
-    }
-    scene.add(labelsGroup);
-
-    // --- Grilla centrada en el modelo ---
-    const gridSize = Math.ceil((size * 1.5) / 5) * 5;
-    const grid = new THREE.GridHelper(
-      gridSize,
-      Math.max(2, Math.ceil(gridSize / 5)),
-      0x38bdf8,
-      0x334155
+  // --- Tanque ---
+  if (metaData.tank) {
+    const t = metaData.tank;
+    const tank = new THREE.Mesh(
+      new THREE.BoxGeometry(t.width, t.top - t.base, t.depth),
+      new THREE.MeshStandardMaterial({
+        color: 0xe07a10, transparent: true, opacity: 0.85, roughness: 0.4,
+      })
     );
-    grid.position.set(cx, -0.01, -cy);
-    scene.add(grid);
+    tank.position.set(t.x - cx, (t.base + t.top) / 2, -(t.y - cy));
+    roofGroup.add(tank);
+  }
 
-    groupsRef.current = { roof: roofGroup, labels: labelsGroup, grid, meshes };
+  // --- Cotas de nivel (centradas) ---
+  const labelsGroup = new THREE.Group();
+  labelsGroup.name = 'labels';
+  const labelWidth = Math.min(Math.max(size * 0.05, 1.8), 7);
 
-    // --- Vistas predefinidas ---
-    const dist = size * 1.6;
-    const ground = new THREE.Vector3(cx, 0, -cy);
-    viewsRef.current = {
-      iso: {
-        pos: center.clone().add(new THREE.Vector3(0.75, 0.6, 0.75).multiplyScalar(dist)),
-        target: center.clone(),
-      },
-      top: {
-        pos: new THREE.Vector3(cx, dist, -cy + dist * 0.001),
-        target: ground,
-      },
-      front: {
-        pos: center.clone().add(new THREE.Vector3(0, 0.25 * dist, dist)),
-        target: center.clone(),
-      },
-      side: {
-        pos: center.clone().add(new THREE.Vector3(dist, 0.25 * dist, 0)),
-        target: center.clone(),
-      },
-    };
+  const polePositions = [];
+  const dotPositions = [];
 
-    camera.position.copy(viewsRef.current.iso.pos);
+  collectLevelLabels(metaData).forEach(({ val, x, y }) => {
+    const sprite = makeLabelSprite(formatLevel(val), labelWidth, darkMode);
+    if (!sprite) return;
+    const yLabel = Math.max(val, 0) + 0.4; // Altura ligeramente despegada del techo
+    const posX = x - cx;
+    const posZ = -(y - cy);
+    sprite.position.set(posX, yLabel, posZ);
+    labelsGroup.add(sprite);
+    polePositions.push(posX, Math.max(val, 0), posZ, posX, yLabel, posZ);
+    dotPositions.push(posX, Math.max(val, 0) + 0.02, posZ);
+  });
+
+  if (polePositions.length) {
+    const poleGeo = new THREE.BufferGeometry();
+    poleGeo.setAttribute('position', new THREE.Float32BufferAttribute(polePositions, 3));
+    labelsGroup.add(
+      new THREE.LineSegments(
+        poleGeo,
+        new THREE.LineBasicMaterial({
+          color: 0x0284c7,
+          transparent: true,
+          opacity: 0.6,
+          linewidth: 2,
+        })
+      )
+    );
+  }
+  if (dotPositions.length) {
+    const dotGeo = new THREE.BufferGeometry();
+    dotGeo.setAttribute('position', new THREE.Float32BufferAttribute(dotPositions, 3));
+    const dotMat = new THREE.PointsMaterial({
+      color: 0x38bdf8,
+      size: Math.min(Math.max(size * 0.015, 0.3), 1.2),
+      transparent: true,
+      opacity: 0.9,
+    });
+    labelsGroup.add(new THREE.Points(dotGeo, dotMat));
+  }
+  scene.add(labelsGroup);
+
+  // --- Grilla en el origen (0,0) ---
+  const gridSize = Math.ceil((size * 1.5) / 5) * 5;
+  const grid = new THREE.GridHelper(
+    gridSize,
+    Math.max(2, Math.ceil(gridSize / 5)),
+    0x38bdf8,
+    0x334155
+  );
+  grid.position.set(0, -0.01, 0);
+  scene.add(grid);
+
+  groupsRef.current = { roof: roofGroup, labels: labelsGroup, grid, meshes };
+
+  // --- Vistas de Cámara reencuadradas al origen ---
+  roofGroup.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(roofGroup);
+
+  // Si por alguna razón el box está vacío, se usa un fallback seguro
+  const modelCenter = box.isEmpty() 
+    ? new THREE.Vector3(0, stats.zAll * 0.25, 0)
+    : box.getCenter(new THREE.Vector3());
+
+  const boxSize = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(boxSize.x, boxSize.y, boxSize.z, size);
+
+  // Distancia calculada dinámicamente según el FOV de la cámara
+  const fovRad = (camera.fov * Math.PI) / 180;
+  let fitDist = Math.abs(maxDim / (2 * Math.tan(fovRad / 2))) * 1.4;
+
+  viewsRef.current = {
+    iso: {
+      pos: modelCenter.clone().add(new THREE.Vector3(1, 0.8, 1).normalize().multiplyScalar(fitDist)),
+      target: modelCenter.clone(),
+    },
+    top: {
+      pos: modelCenter.clone().add(new THREE.Vector3(0, fitDist, 0.001)),
+      target: modelCenter.clone(),
+    },
+    front: {
+      pos: modelCenter.clone().add(new THREE.Vector3(0, 0, fitDist)),
+      target: modelCenter.clone(),
+    },
+    side: {
+      pos: modelCenter.clone().add(new THREE.Vector3(fitDist, 0, 0)),
+      target: modelCenter.clone(),
+    },
+  };
+
+  camera.position.copy(viewsRef.current.iso.pos);
 
     // --- Controles ---
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -836,6 +889,27 @@ export const Modelo3DViewer = ({
     if (refreshHighlightRef.current) refreshHighlightRef.current();
   }, [selectedId, sceneVersion]);
 
+  // Modo oscuro del modelo 3d
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const groups = groupsRef.current;
+    if (!scene) return;
+    const bgColor = darkMode ? 0x0f172a : 0xf1f5f9; // slate-900 u slate-100
+    scene.background = new THREE.Color(bgColor);
+
+    if (groups && groups.grid) {
+      const centerColor = darkMode ? 0x38bdf8 : 0x0284c7; // Azul brillante vs Azul medio
+      const gridColor = darkMode ? 0x334155 : 0xcbd5e1;   // Gris oscuro vs Gris claro
+
+      if (Array.isArray(groups.grid.material)) {
+        groups.grid.material[0].color.setHex(centerColor);
+        groups.grid.material[1].color.setHex(gridColor);
+      } else if (groups.grid.material) {
+        groups.grid.material.color.setHex(gridColor);
+      }
+    }
+  }, [sceneVersion, darkMode]);
+
   // ----------------------------------------------------------
   // MÁSTILES
   // ----------------------------------------------------------
@@ -915,38 +989,66 @@ export const Modelo3DViewer = ({
   return (
     <div
       ref={containerRef}
-      className="flex flex-col h-full w-full bg-slate-900 rounded-md overflow-hidden border border-slate-700 relative shadow-inner"
+      className={`flex flex-col h-full w-full rounded-md overflow-hidden border relative shadow-inner transition-colors duration-300 ${
+        darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-300 text-slate-800'
+      }`}
     >
       {/* Barra superior: vistas y acciones */}
-      <div className="bg-slate-800 border-b border-slate-700 px-3 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 z-10">
-        <div className="flex items-center gap-2 text-white font-condensed font-bold text-xs">
+      <div
+        className={`border-b px-3 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 z-10 transition-colors ${
+          darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+        }`}
+      >
+        <div className={`flex items-center gap-2 font-condensed font-bold text-xs ${darkMode ? 'text-white' : 'text-slate-800'}`}>
           <Box className="w-4 h-4 text-brand-blue" />
           <span>Visor 3D</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-slate-400 mr-1">Vista:</span>
+          <span className={`text-[11px] mr-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Vista:</span>
           <ToolBtn onClick={() => setView('iso')} title="Vista isométrica">Isométrica</ToolBtn>
           <ToolBtn onClick={() => setView('top')} title="Vista desde arriba">Planta</ToolBtn>
           <ToolBtn onClick={() => setView('front')} title="Vista frontal">Frontal</ToolBtn>
           <ToolBtn onClick={() => setView('side')} title="Vista lateral">Lateral</ToolBtn>
-          <span className="w-px h-5 bg-slate-600 mx-1" />
+          <span className={`w-px h-5 mx-1 ${darkMode ? 'bg-slate-600' : 'bg-slate-300'}`} />
+        
+          <ToolBtn onClick={() => setDarkMode((v) => !v)}
+            title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
+            {darkMode ? (
+              <>
+                <Sun className="w-3 h-3 text-amber-400" /> Modo Claro</>
+            ) : (
+              <>
+                <Moon className="w-3 h-3 text-indigo-500" /> Modo Oscuro</>
+            )}
+          </ToolBtn>
+
+          <div className="flex items-center gap-1">
+
+          <ToolBtn onClick={() => handleZoom(0.8)} title="Acercar (+)">
+            <ZoomIn className="w-3.5 h-3.5" />
+          </ToolBtn>
+          <ToolBtn onClick={() => handleZoom(1.25)} title="Alejar (-)">
+            <ZoomOut className="w-3.5 h-3.5" />
+          </ToolBtn>
+        </div>
+
+        <span className={`w-px h-5 mx-1 ${darkMode ? 'bg-slate-600' : 'bg-slate-300'}`} />
+
           <ToolBtn onClick={handleReset} title="Volver a la vista inicial">
             <RefreshCw className="w-3 h-3" /> Restablecer
           </ToolBtn>
-          <ToolBtn
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-          >
+          <ToolBtn onClick={toggleFullscreen} title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}>
             {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
           </ToolBtn>
         </div>
       </div>
-
-      {/* Barra de opciones */}
-      <div className="bg-slate-800/80 border-b border-slate-700 px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 z-10">
+      <div
+        className={`border-b px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 z-10 transition-colors ${
+          darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-200/80 border-slate-300'
+        }`}>
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-slate-400">Color:</span>
+          <span className={`text-[11px] ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>Color:</span>
           <Chip active={colorMode === 'altura'} onClick={() => setColorMode('altura')} title="Colorear según la altura">
             Por altura
           </Chip>
@@ -956,7 +1058,7 @@ export const Modelo3DViewer = ({
         </div>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-slate-400">Mostrar:</span>
+          <span className={`text-[11px] ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>Mostrar:</span>
           <Chip active={showLabels} onClick={() => setShowLabels((v) => !v)} title="Cotas de nivel">Cotas</Chip>
           <Chip active={showEdges} onClick={() => setShowEdges((v) => !v)} title="Bordes de las cubiertas">Bordes</Chip>
           <Chip active={showGrid} onClick={() => setShowGrid((v) => !v)} title="Grilla del piso">Grilla</Chip>
@@ -975,7 +1077,7 @@ export const Modelo3DViewer = ({
           )}
         </div>
 
-        <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+        <label className={`flex items-center gap-1.5 text-[11px] ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
           Opacidad
           <input
             type="range"
@@ -1004,16 +1106,16 @@ export const Modelo3DViewer = ({
 
         {/* Estados: cargando / error / vacío */}
         {loading && (
-          <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center text-slate-300 z-20">
+          <div className={`absolute inset-0 flex flex-col items-center justify-center z-20 ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>
             <Loader2 className="w-8 h-8 text-brand-blue animate-spin mb-2" />
             <span className="text-xs font-semibold">Cargando modelo 3D...</span>
           </div>
         )}
 
         {!loading && error && (
-          <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center text-center px-6 z-20">
+          <div className={`absolute inset-0 flex flex-col items-center justify-center text-center px-6 z-20 ${darkMode ? 'bg-slate-900/95' : 'bg-slate-100/95'}`}>
             <AlertTriangle className="w-8 h-8 text-amber-400 mb-2" />
-            <p className="text-xs text-slate-200 mb-3 max-w-xs">{error}</p>
+            <p className={`text-xs mb-3 max-w-xs ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{error}</p>
             <ToolBtn onClick={fetchModel} title="Reintentar">
               <RefreshCw className="w-3 h-3" /> Reintentar
             </ToolBtn>
@@ -1023,7 +1125,7 @@ export const Modelo3DViewer = ({
         {noGeometry && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 z-10 pointer-events-none">
             <Box className="w-8 h-8 text-slate-500 mb-2" />
-            <p className="text-xs text-slate-300 max-w-xs">
+            <p className={`text-xs max-w-xs ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
               El modelo no tiene cubiertas para mostrar. Vuelva al paso anterior y verifique que el plano tenga polígonos de techo (ROOF).
             </p>
           </div>
@@ -1031,11 +1133,15 @@ export const Modelo3DViewer = ({
 
         {/* Panel de cubiertas */}
         {regionList.length > 0 && (
-          <div className="absolute top-2 left-2 z-10 w-52 max-h-[60%] flex flex-col bg-slate-800/95 border border-slate-700 rounded-md shadow-lg">
+          <div className={`absolute top-2 left-2 z-10 w-52 max-h-[60%] flex flex-col border rounded-md shadow-lg ${
+            darkMode ? 'bg-slate-800/95 border-slate-700' : 'bg-white/95 border-slate-300'
+          }`}>
             <button
               type="button"
               onClick={() => setPanelOpen((v) => !v)}
-              className="flex items-center justify-between px-2.5 py-1.5 text-[11px] font-bold text-slate-200 hover:text-white"
+              className={`flex items-center justify-between px-2.5 py-1.5 text-[11px] font-bold ${
+                darkMode ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'
+              }`}
               aria-expanded={panelOpen}
             >
               <span>Cubiertas ({regionList.length})</span>
@@ -1043,7 +1149,7 @@ export const Modelo3DViewer = ({
             </button>
 
             {panelOpen && (
-              <ul className="overflow-y-auto border-t border-slate-700">
+              <ul className={`overflow-y-auto border-t ${darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
                 {regionList.map((r) => (
                   <li key={r.id}>
                     <button
@@ -1052,10 +1158,13 @@ export const Modelo3DViewer = ({
                         setSelectedId(r.id);
                         if (focusRegionRef.current) focusRegionRef.current(r.id);
                       }}
-                      className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] transition ${r.id === selectedId
-                          ? 'bg-amber-500/20 text-amber-200'
-                          : 'text-slate-300 hover:bg-slate-700'
-                        }`}
+                      className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] transition ${
+                        r.id === selectedId
+                          ? 'bg-amber-500/20 text-amber-500 font-semibold'
+                          : darkMode
+                          ? 'text-slate-300 hover:bg-slate-700'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
                     >
                       <span className="flex items-center gap-1 truncate">
                         {r.sinNiveles && (
@@ -1063,7 +1172,7 @@ export const Modelo3DViewer = ({
                         )}
                         <span className="truncate">{r.id}</span>
                       </span>
-                      <span className="text-slate-400 shrink-0">
+                      <span className={`shrink-0 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {r.zlow === r.zhigh ? `${fmt(r.zhigh)} m` : `${fmt(r.zlow)}–${fmt(r.zhigh)} m`}
                       </span>
                     </button>
@@ -1076,13 +1185,15 @@ export const Modelo3DViewer = ({
 
         {/* Detalle de la cubierta seleccionada */}
         {selected && (
-          <div className="absolute top-2 right-2 z-10 w-60 bg-slate-800/95 border border-amber-500/60 rounded-md shadow-lg text-[11px] text-slate-200">
-            <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-slate-700">
+          <div className={`absolute top-2 right-2 z-10 w-60 border border-amber-500/60 rounded-md shadow-lg text-[11px] ${
+            darkMode ? 'bg-slate-800/95 text-slate-200' : 'bg-white/95 text-slate-800'
+          }`}>
+            <div className={`flex items-center justify-between px-2.5 py-1.5 border-b ${darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
               <span className="font-bold truncate">{selected.id}</span>
               <button
                 type="button"
                 onClick={() => setSelectedId(null)}
-                className="text-slate-400 hover:text-white"
+                className={darkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}
                 aria-label="Cerrar detalle"
               >
                 <X className="w-3.5 h-3.5" />
@@ -1091,29 +1202,29 @@ export const Modelo3DViewer = ({
 
             <dl className="px-2.5 py-2 space-y-1">
               <div className="flex justify-between gap-2">
-                <dt className="text-slate-400">Tipo</dt>
+                <dt className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Tipo</dt>
                 <dd className="text-right">{tipoLabel(selected.tipo)}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-400">Altura baja</dt>
+                <dt className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Altura baja</dt>
                 <dd>{fmt(selected.zlow)} m</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-400">Altura alta</dt>
+                <dt className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Altura alta</dt>
                 <dd>{fmt(selected.zhigh)} m</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-400">Desnivel</dt>
+                <dt className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Desnivel</dt>
                 <dd>{selected.plana ? 'Plana (0.00 m)' : `${fmt(selected.desnivel)} m`}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-400">Área</dt>
+                <dt className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Área</dt>
                 <dd>{fmt(selected.area, 1)} m²</dd>
               </div>
             </dl>
 
             {selected.sinNiveles && (
-              <p className="px-2.5 pb-2 text-amber-300 flex gap-1.5">
+              <p className="px-2.5 pb-2 text-amber-500 flex gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
                 Esta cubierta no tiene niveles asociados; la altura es una estimación. Asócielos en el paso de validación.
               </p>
@@ -1121,14 +1232,14 @@ export const Modelo3DViewer = ({
 
             {selected.niveles.length > 0 && (
               <div className="px-2.5 pb-2">
-                <p className="text-slate-400 mb-1">Niveles asociados</p>
+                <p className={`mb-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Niveles asociados</p>
                 <ul className="space-y-0.5 max-h-24 overflow-y-auto">
                   {selected.niveles.map((n, i) => {
                     const v = num(n.valor ?? n.value);
                     return (
                       <li key={n.id || i} className="flex justify-between">
                         <span>{v === null ? '—' : formatLevel(v)} m</span>
-                        <span className="text-slate-400">
+                        <span className={darkMode ? 'text-slate-400' : 'text-slate-500'}>
                           {Number.isInteger(n.lado) ? `lado ${n.lado}` : ''}
                         </span>
                       </li>
@@ -1151,7 +1262,9 @@ export const Modelo3DViewer = ({
 
         {/* Leyenda de alturas */}
         {colorMode === 'altura' && regionList.length > 0 && !selected && (
-          <div className="absolute top-2 right-2 z-10 flex items-stretch gap-1.5 bg-slate-800/90 border border-slate-700 rounded-md px-2 py-1.5 text-[10px] text-slate-300 pointer-events-none">
+          <div className={`absolute top-2 right-2 z-10 flex items-stretch gap-1.5 border rounded-md px-2 py-1.5 text-[10px] pointer-events-none ${
+            darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-700'
+          }`}>
             <div className="w-2.5 h-24 rounded-sm" style={{ background: LEGEND_GRADIENT }} />
             <div className="flex flex-col justify-between">
               <span>{fmt(heightRange.zMax)} m</span>
@@ -1163,31 +1276,35 @@ export const Modelo3DViewer = ({
         {/* Tooltip al pasar el mouse */}
         {tooltip && (
           <div
-            className="absolute z-20 pointer-events-none bg-slate-900/95 border border-slate-600 rounded px-2 py-1.5 text-[11px] text-slate-100 shadow-lg"
+            className={`absolute z-20 pointer-events-none border rounded px-2 py-1.5 text-[11px] shadow-lg ${
+              darkMode ? 'bg-slate-900/95 border-slate-600 text-slate-100' : 'bg-white/95 border-slate-300 text-slate-800'
+            }`}
             style={{ left: tooltip.x, top: tooltip.y, maxWidth: 200 }}
           >
             <div className="font-bold truncate">{tooltip.id}</div>
-            <div className="text-slate-300">Altura en el cursor: {fmt(tooltip.z)} m</div>
+            <div className={darkMode ? 'text-slate-300' : 'text-slate-600'}>Altura en el cursor: {fmt(tooltip.z)} m</div>
             {tooltipRegion && (
-              <div className="text-slate-400 truncate">{tipoLabel(tooltipRegion.tipo)}</div>
+              <div className={`truncate ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{tipoLabel(tooltipRegion.tipo)}</div>
             )}
           </div>
         )}
 
         {/* Ayuda de controles */}
         {showHint && model3dData && !loading && !error && (
-          <div className="absolute bottom-2 left-2 z-10 flex items-start gap-2 bg-slate-800/90 border border-slate-700 rounded-md px-2.5 py-1.5 text-[10px] text-slate-300 max-w-[85%]">
+          <div className={`absolute bottom-2 left-2 z-10 flex items-start gap-2 border rounded-md px-2.5 py-1.5 text-[10px] max-w-[85%] ${
+            darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-600'
+          }`}>
             <p>
-              <strong className="text-slate-100">Arrastrar</strong> rota ·{' '}
-              <strong className="text-slate-100">Clic derecho</strong> mueve ·{' '}
-              <strong className="text-slate-100">Rueda</strong> acerca ·{' '}
-              <strong className="text-slate-100">Clic</strong> selecciona una cubierta ·{' '}
-              <strong className="text-slate-100">Doble clic</strong> la enfoca
+              <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Arrastrar</strong> rota ·{' '}
+              <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Clic derecho</strong> mueve ·{' '}
+              <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Rueda</strong> acerca ·{' '}
+              <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Clic</strong> selecciona una cubierta ·{' '}
+              <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Doble clic</strong> la enfoca
             </p>
             <button
               type="button"
               onClick={() => setShowHint(false)}
-              className="text-slate-400 hover:text-white shrink-0"
+              className={`shrink-0 ${darkMode ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:text-slate-800'}`}
               aria-label="Ocultar ayuda"
             >
               <X className="w-3 h-3" />
