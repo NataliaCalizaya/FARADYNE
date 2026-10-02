@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import functools
 import threading
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from shapely.geometry import Polygon, box
+from sqlalchemy.orm import Session
 
 from app.repositories.plano_repository import PlanoRepository
 from app.services.niveles_utils import NivelesUtils
@@ -26,12 +28,12 @@ _LOCKS_GUARD = threading.Lock()
 
 def _con_lock_modelo(func):
     @functools.wraps(func)
-    def wrapper(cls, id_modelo2d, *args, **kwargs):
+    def wrapper(cls, db, id_modelo2d, *args, **kwargs):
         with _LOCKS_GUARD:
             lock = _LOCKS_MODELO.setdefault(str(id_modelo2d), threading.RLock())
 
         with lock:
-            return func(cls, id_modelo2d, *args, **kwargs)
+            return func(cls, db, id_modelo2d, *args, **kwargs)
 
     return wrapper
 
@@ -63,15 +65,18 @@ class EditorModelo2DService:
     # =========================================================
 
     @staticmethod
-    def _get_modelo2d(id_modelo2d: str) -> Dict[str, Any]:
-        modelo = PlanoRepository.get_modelo2d_by_id(id_modelo2d)
+    def _get_modelo2d(db: Session, id_modelo2d: int) -> Dict[str, Any]:
+        modelo = PlanoRepository.get_modelo2d_by_id(db, id_modelo2d)
 
         if not modelo:
             raise ValueError(
                 f"No se encontró el Modelo 2D con ID '{id_modelo2d}'."
             )
 
-        return modelo
+        # Copia profunda: este servicio muta poligonos / cotas_altura en
+        # memoria. Si fueran los mismos objetos JSONB que sostiene el ORM,
+        # SQLAlchemy vería "mismo valor" al asignarlos y no emitiría el UPDATE.
+        return copy.deepcopy(modelo)
 
     @staticmethod
     def _get_list(modelo: Dict[str, Any], field: str) -> List[Any]:
@@ -89,13 +94,13 @@ class EditorModelo2DService:
 
     @classmethod
     def _cargar(
-        cls, id_modelo2d: str
+        cls, db: Session, id_modelo2d: int
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Carga el modelo. Si es de antes de las asociaciones por lado, lo
         migra en memoria (se persiste en el primer guardado).
         """
-        modelo = cls._get_modelo2d(id_modelo2d)
+        modelo = cls._get_modelo2d(db, id_modelo2d)
         poligonos = cls._get_list(modelo, "poligonos")
         niveles = cls._get_list(modelo, "cotas_altura")
 
@@ -106,7 +111,8 @@ class EditorModelo2DService:
     @classmethod
     def _guardar(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         modelo: Dict[str, Any],
         poligonos: List[Dict[str, Any]],
         niveles: List[Dict[str, Any]],
@@ -115,11 +121,16 @@ class EditorModelo2DService:
         """Regenera los derivados de los polígonos y persiste."""
         NivelesUtils.reconstruir_niveles_poligonos(poligonos, niveles)
 
+        # Cualquier edición deja el Modelo 2D sin validar: hay que volver a
+        # validarlo antes de generar el 3D (el repository ya no lo hace solo).
+        extra.setdefault("validado", False)
+
         modelo["poligonos"] = poligonos
         modelo["cotas_altura"] = niveles
         modelo.update(extra)
 
         return PlanoRepository.update_modelo2d(
+            db,
             id_modelo2d=id_modelo2d,
             poligonos=poligonos,
             cotas_altura=niveles,
@@ -340,7 +351,8 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def crear_rectangulo(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         x1: float,
         y1: float,
         x2: float,
@@ -349,7 +361,7 @@ class EditorModelo2DService:
         page: int = 0,
         tipo_cubierta: str = "pendiente_por_resolver",
     ) -> Dict[str, Any]:
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         capa = cls._validate_existing_layer(modelo, capa)
 
         try:
@@ -378,7 +390,7 @@ class EditorModelo2DService:
         )
 
         poligonos.append(poligono)
-        cls._guardar(id_modelo2d, modelo, poligonos, niveles)
+        cls._guardar(db, id_modelo2d, modelo, poligonos, niveles)
 
         return poligono
 
@@ -386,7 +398,8 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def crear_triangulo(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         puntos: List[Any],
         capa: str,
         page: int = 0,
@@ -394,7 +407,7 @@ class EditorModelo2DService:
     ) -> Dict[str, Any]:
         # Antes estaba anidado (con sangría de más) dentro de
         # _create_fitz_rect, después de un return: no existía como método.
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
 
         puntos_normalizados = cls._normalize_points(puntos)
 
@@ -408,7 +421,7 @@ class EditorModelo2DService:
         )
 
         poligonos.append(poligono)
-        cls._guardar(id_modelo2d, modelo, poligonos, niveles)
+        cls._guardar(db, id_modelo2d, modelo, poligonos, niveles)
 
         return poligono
 
@@ -416,11 +429,12 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def actualizar_poligono(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         id_poligono: str,
         datos: Dict[str, Any],
     ) -> Dict[str, Any]:
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         polygon = cls._buscar(poligonos, id_poligono, "polígono")
 
         if "puntos" in datos:
@@ -451,7 +465,7 @@ class EditorModelo2DService:
 
         polygon["origen"] = polygon.get("origen", "manual")
 
-        if not cls._guardar(id_modelo2d, modelo, poligonos, niveles):
+        if not cls._guardar(db, id_modelo2d, modelo, poligonos, niveles):
             raise ValueError("No se pudo guardar el polígono actualizado.")
 
         return polygon
@@ -459,16 +473,16 @@ class EditorModelo2DService:
     @classmethod
     @_con_lock_modelo
     def eliminar_poligono(
-        cls, id_modelo2d: str, id_poligono: str
+        cls, db: Session, id_modelo2d: int, id_poligono: str
     ) -> Dict[str, Any]:
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         cls._buscar(poligonos, id_poligono, "polígono")
 
         poligonos = [p for p in poligonos if str(p.get("id")) != str(id_poligono)]
 
         # Los niveles asociados a ese polígono NO se borran: quedan sin
         # asociar (la asociación huérfana se limpia en _guardar).
-        return cls._guardar(id_modelo2d, modelo, poligonos, niveles) or modelo
+        return cls._guardar(db, id_modelo2d, modelo, poligonos, niveles) or modelo
 
     # =========================================================
     # VÉRTICES
@@ -543,7 +557,8 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def agregar_vertice_poligono(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         id_poligono: str,
         punto: Dict[str, Any],
         indice: Optional[int] = None,
@@ -561,7 +576,7 @@ class EditorModelo2DService:
         lado quedan en la mitad más cercana y los lados siguientes se corren
         un lugar, para que ningún nivel cambie de lado por error.
         """
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         polygon = cls._buscar(poligonos, id_poligono, "polígono")
 
         puntos = cls._normalize_points(polygon.get("puntos") or [])
@@ -616,7 +631,7 @@ class EditorModelo2DService:
         cls._remapear_lados(niveles, id_poligono, nuevo_lado)
         cls._ajustar_tipo(polygon)
 
-        if not cls._guardar(id_modelo2d, modelo, poligonos, niveles):
+        if not cls._guardar(db, id_modelo2d, modelo, poligonos, niveles):
             raise ValueError("No se pudo guardar el vértice.")
 
         return polygon
@@ -625,7 +640,8 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def eliminar_vertice_poligono(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         id_poligono: str,
         indice: int,
     ) -> Dict[str, Any]:
@@ -636,7 +652,7 @@ class EditorModelo2DService:
         niveles asociados a cualquiera de los dos pasan al lado fusionado y
         los lados siguientes se corren un lugar hacia atrás.
         """
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         polygon = cls._buscar(poligonos, id_poligono, "polígono")
 
         puntos = cls._normalize_points(polygon.get("puntos") or [])
@@ -669,7 +685,7 @@ class EditorModelo2DService:
         cls._remapear_lados(niveles, id_poligono, nuevo_lado)
         cls._ajustar_tipo(polygon)
 
-        if not cls._guardar(id_modelo2d, modelo, poligonos, niveles):
+        if not cls._guardar(db, id_modelo2d, modelo, poligonos, niveles):
             raise ValueError("No se pudo eliminar el vértice.")
 
         return polygon
@@ -737,7 +753,8 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def crear_nivel(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         valor: float,
         punto_seleccionado: Dict[str, Any],
         texto: Optional[str] = None,
@@ -758,7 +775,7 @@ class EditorModelo2DService:
           puede asociar después con asociar_nivel_poligono. No genera
           pendiente hasta que se asocie.
         """
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
 
         valor = cls._validar_valor_nivel(valor)
         punto = cls._normalize_selected_point(punto_seleccionado)
@@ -797,7 +814,7 @@ class EditorModelo2DService:
         niveles.append(nuevo_nivel)
 
         if not cls._guardar(
-            id_modelo2d, modelo, poligonos, niveles, capas=modelo.get("capas")
+            db, id_modelo2d, modelo, poligonos, niveles, capas=modelo.get("capas")
         ):
             raise ValueError("No se pudo guardar el nivel.")
 
@@ -808,11 +825,12 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def actualizar_nivel(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         id_nivel: str,
         datos: Dict[str, Any],
     ) -> Dict[str, Any]:
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         nivel = cls._buscar(niveles, id_nivel, "nivel")
 
         if "valor" in datos:
@@ -843,21 +861,21 @@ class EditorModelo2DService:
             "y": float(nivel.get("y", 0)),
         }
 
-        if not cls._guardar(id_modelo2d, modelo, poligonos, niveles):
+        if not cls._guardar(db, id_modelo2d, modelo, poligonos, niveles):
             raise ValueError("No se pudo actualizar el nivel.")
 
         return {"mensaje": "Nivel actualizado correctamente.", "nivel": nivel}
 
     @classmethod
     @_con_lock_modelo
-    def eliminar_nivel(cls, id_modelo2d: str, id_nivel: str) -> Dict[str, Any]:
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+    def eliminar_nivel(cls, db: Session, id_modelo2d: int, id_nivel: str) -> Dict[str, Any]:
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
         nivel = cls._buscar(niveles, id_nivel, "nivel")
 
         niveles = [n for n in niveles if n is not nivel]
 
         # _guardar regenera los polígonos: el nivel desaparece de todos.
-        if not cls._guardar(id_modelo2d, modelo, poligonos, niveles):
+        if not cls._guardar(db, id_modelo2d, modelo, poligonos, niveles):
             raise ValueError("No se pudo eliminar el nivel.")
 
         return {"mensaje": "Nivel eliminado correctamente.", "nivel": nivel}
@@ -870,7 +888,8 @@ class EditorModelo2DService:
     @_con_lock_modelo
     def asociar_nivel_poligono(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         id_poligono: str,
         id_nivel: str,
         lado: Optional[int] = None,
@@ -883,20 +902,21 @@ class EditorModelo2DService:
         estar asociado a más de un polígono (p. ej. lado compartido); si ya
         estaba asociado a ESTE polígono, solo se cambia el lado.
         """
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
 
         poligono = cls._buscar(poligonos, id_poligono, "polígono")
         nivel = cls._buscar(niveles, id_nivel, "nivel")
 
         cls._asociar(poligono, nivel, lado)
 
-        return cls._guardar(id_modelo2d, modelo, poligonos, niveles) or modelo
+        return cls._guardar(db, id_modelo2d, modelo, poligonos, niveles) or modelo
 
     @classmethod
     @_con_lock_modelo
     def desasociar_nivel_poligono(
         cls,
-        id_modelo2d: str,
+        db: Session,
+        id_modelo2d: int,
         id_poligono: str,
         id_nivel: str,
     ) -> Dict[str, Any]:
@@ -905,7 +925,7 @@ class EditorModelo2DService:
         creados. El nivel NO se borra: queda sin asociar y se puede asociar
         de nuevo (a otro polígono o lado) o eliminar con eliminar_nivel.
         """
-        modelo, poligonos, niveles = cls._cargar(id_modelo2d)
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
 
         cls._buscar(poligonos, id_poligono, "polígono")
         nivel = cls._buscar(niveles, id_nivel, "nivel")
@@ -916,7 +936,7 @@ class EditorModelo2DService:
             if str(a.get("id_poligono")) != str(id_poligono)
         ]
 
-        return cls._guardar(id_modelo2d, modelo, poligonos, niveles) or modelo
+        return cls._guardar(db, id_modelo2d, modelo, poligonos, niveles) or modelo
 
     # =========================================================
     # VALIDACIÓN
@@ -950,8 +970,8 @@ class EditorModelo2DService:
             raise ValueError(f"Coordenadas inválidas en el polígono '{polygon_id}'.")
 
     @classmethod
-    def validar_modelo2d(cls, id_modelo2d: str) -> None:
-        modelo = cls._get_modelo2d(id_modelo2d)
+    def validar_modelo2d(cls, db: Session, id_modelo2d: int) -> None:
+        modelo = cls._get_modelo2d(db, id_modelo2d)
         poligonos = modelo.get("poligonos") or []
 
         if not poligonos:
@@ -999,13 +1019,13 @@ class EditorModelo2DService:
                     f"El polígono '{polygon_id}' tiene un área inválida o cruzada (cero)."
                 )
 
-        PlanoRepository.update_modelo2d(id_modelo2d=id_modelo2d, validado=True)
+        PlanoRepository.update_modelo2d(db, id_modelo2d=id_modelo2d, validado=True)
 
     # =========================================================
     # OBTENER MODELO
     # =========================================================
 
     @classmethod
-    def obtener_modelo2d(cls, id_modelo2d: str) -> Dict[str, Any]:
-        modelo, _, _ = cls._cargar(id_modelo2d)
+    def obtener_modelo2d(cls, db: Session, id_modelo2d: int) -> Dict[str, Any]:
+        modelo, _, _ = cls._cargar(db, id_modelo2d)
         return modelo

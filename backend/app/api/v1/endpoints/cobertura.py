@@ -8,10 +8,13 @@ HU05 - Cobertura SPDA por Esfera Rodante (ternas de mástiles).
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
+from app.api.v1.endpoints.common import extraer_dimensiones_modelo3d
+from app.core.database import get_db
 from app.repositories.mastil_repository import MastilRepository
 from app.repositories.modelo3d_repository import Modelo3DRepository
 from app.repositories.nivel_proteccion_repository import NivelProteccionRepository
@@ -24,87 +27,58 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cobertura", tags=["cobertura de mastiles"])
 
-
-def _extraer_dimensiones_modelo3d(
-    modelo3d: Dict[str, Any],
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """Longitud, anchura y altura desde `geometria_volumetrica` (bbox / levels)."""
-    geometria = modelo3d.get("geometria_volumetrica") or {}
-
-    length = width = None
-    bbox = geometria.get("bbox")
-    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-        bx0, by0, bx1, by1 = bbox
-        length = round(float(bx1) - float(bx0), 2)
-        width = round(float(by1) - float(by0), 2)
-
-    height = modelo3d.get("altura_h")
-    if not height or float(height) <= 0:
-        alturas = [float(v) for v in (geometria.get("levels") or []) if v is not None]
-        height = max(alturas) if alturas else None
-
-    return length, width, (float(height) if height else None)
+# La BD guarda solo 'I' | 'II' | 'III' | 'IV' (CHECK); se acepta también "Nivel IV".
+RADIOS_POR_NIVEL = {"IV": 60.0, "III": 45.0, "II": 30.0, "I": 20.0}
 
 
-def _calcular_cobertura(id_proyecto: str) -> Dict[str, Any]:
-    """Calcula la cobertura del proyecto. Devuelve la respuesta + `_evaluacion` (interno)."""
-     # 1. Nivel de protección y radio de esfera del proyecto.
+def _radio_por_nivel(nivel_str: str) -> float:
+    clave = str(nivel_str).upper().replace("NIVEL", "").strip()
+    return RADIOS_POR_NIVEL.get(clave, 20.0)
+
+
+def _calcular_cobertura(db: Session, id_proyecto: int) -> Dict[str, Any]:
+    """Calcula la cobertura del proyecto. Devuelve respuesta + evaluación (interno)."""
+    # 1. Nivel de protección (HU04) -> radio de la esfera. Fallback: Nivel I (20 m).
+    nivel_str, radio = "I", 20.0
     try:
-        nivel_db = (
-            NivelProteccionRepository
-            .get_nivel_proteccion_by_proyecto_id(id_proyecto)
-        )
-
-        if not nivel_db:
-            raise ValueError(
-                f"No existe nivel de protección para el proyecto {id_proyecto}"
+        nivel_db = NivelProteccionRepository.get_nivel_proteccion_by_proyecto_id(db, id_proyecto)
+        if nivel_db:
+            nivel_str = (
+                nivel_db.get("nivel_proteccion")
+                or nivel_db.get("nivel_proteccion_recomendado")
+                or "I"
             )
-
-        nivel_str = (
-            nivel_db.get("nivel_proteccion")
-            or "Nivel I"
-        )
-
-        radio_db = nivel_db.get("radio_esfera")
-
-        if radio_db is None:
-            raise ValueError(
-                f"El proyecto {id_proyecto} no tiene radio_esfera definido"
-            )
-
-        radio = float(radio_db)
-
+            radio_db = nivel_db.get("radio_esfera")
+            radio = float(radio_db) if radio_db else _radio_por_nivel(nivel_str)
     except Exception:
-        logger.exception(
-            "No se pudo obtener el nivel de protección y radio "
-            "del proyecto %s",
-            id_proyecto
-        )
-        raise
+        db.rollback()  # una query fallida deja la transacción abortada
+        logger.exception("No se pudo leer el nivel de protección del proyecto %s", id_proyecto)
 
-    # 2. Modelo 3D (dimensiones de respaldo) + polígonos del Modelo 2D (cubierta real).
+    # 2. Modelo 3D (dimensiones de respaldo) + polígonos del Modelo 2D.
     dims = {"longitud": 20.0, "anchura": 15.0, "altura": 7.5}
     poligonos = []
     try:
-        modelo3d = Modelo3DRepository.get_modelo3d_by_proyecto_id(id_proyecto)
+        modelo3d = Modelo3DRepository.get_modelo3d_by_proyecto_id(db, id_proyecto)
         if modelo3d:
-            length, width, height = _extraer_dimensiones_modelo3d(modelo3d)
+            length, width, height = extraer_dimensiones_modelo3d(modelo3d)
             dims = {
                 "longitud": length or dims["longitud"],
                 "anchura": width or dims["anchura"],
                 "altura": height or dims["altura"],
             }
             id_modelo2d = modelo3d.get("id_modelo2d")
-            modelo2d = PlanoRepository.get_modelo2d_by_id(id_modelo2d) if id_modelo2d else None
+            modelo2d = PlanoRepository.get_modelo2d_by_id(db, id_modelo2d) if id_modelo2d else None
             poligonos = (modelo2d or {}).get("poligonos") or []
     except Exception:
+        db.rollback()
         logger.exception("No se pudo leer el modelo del proyecto %s", id_proyecto)
 
     # 3. Mástiles del proyecto.
     masts = []
     try:
-        masts = MastilRepository.get_mastiles_by_proyecto_id(id_proyecto)
+        masts = MastilRepository.get_mastiles_by_proyecto_id(db, id_proyecto)
     except Exception:
+        db.rollback()
         logger.exception("No se pudieron leer los mástiles del proyecto %s", id_proyecto)
 
     masts_for_eval = [
@@ -134,7 +108,7 @@ def _calcular_cobertura(id_proyecto: str) -> Dict[str, Any]:
         evaluacion_ok = False
 
     respuesta = {
-        "id_proyecto": id_proyecto,
+        "id_proyecto": str(id_proyecto),
         "nivel_proteccion": nivel_str,
         "radio_esfera_rodante_r": radio,
         "total_mastiles": len(masts),
@@ -152,15 +126,15 @@ def _calcular_cobertura(id_proyecto: str) -> Dict[str, Any]:
 
 
 @router.get("/proyecto/{idProyecto}", response_model=CoberturaResponse)
-def get_cobertura_mastiles(idProyecto: str) -> Dict[str, Any]:
+def get_cobertura_mastiles(idProyecto: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """HU05: cobertura SPDA por ternas de mástiles (no persiste)."""
-    return _calcular_cobertura(idProyecto)["respuesta"]
+    return _calcular_cobertura(db, idProyecto)["respuesta"]
 
 
 @router.post("/proyecto/{idProyecto}/guardar", response_model=CoberturaResponse)
-def guardar_cobertura_mastiles(idProyecto: str) -> Dict[str, Any]:
+def guardar_cobertura_mastiles(idProyecto: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """HU05: recalcula la cobertura y guarda qué prismas quedan protegidos/vulnerables."""
-    calculo = _calcular_cobertura(idProyecto)
+    calculo = _calcular_cobertura(db, idProyecto)
     if not calculo["evaluacion_ok"]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -170,7 +144,7 @@ def guardar_cobertura_mastiles(idProyecto: str) -> Dict[str, Any]:
     protegidas, vulnerables, mallas = SPDAService.resumen_para_persistencia(calculo["evaluacion"])
     try:
         fila = ResultadoSimulacionRepository.upsert_por_proyecto(
-            idProyecto, protegidas, vulnerables, mallas
+            db, idProyecto, protegidas, vulnerables, mallas
         )
     except Exception:
         logger.exception("No se pudo guardar el resultado de cobertura del proyecto %s", idProyecto)

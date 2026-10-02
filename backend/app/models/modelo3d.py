@@ -1,16 +1,22 @@
-from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import Dict, Any, Optional
+from sqlalchemy import Column, Integer, Float, Date, DateTime, ForeignKey, func
+from sqlalchemy.dialects.postgresql import JSONB
+
+from .base import Base
 
 
-@dataclass
-class Modelo3D:
-    id_modelo3d: Optional[int] = None
-    geometria_volumetrica: Dict[str, Any] = field(default_factory=dict)
-    escala: Optional[float] = 1.0
-    creado_en: Optional[date] = None
-    altura_h: Optional[float] = 0.0
-    id_modelo2d: Optional[int] = None
-    vista_defecto: Optional[Dict[str, Any]] = None  # Para que coincida con la DB y el SQL
-    actualizado_en: Optional[datetime] = None
+class Modelo3D(Base):
+    __tablename__ = 'modelo3d'
 
+    id_modelo3d = Column(Integer, primary_key=True, autoincrement=True)
+    geometria_volumetrica = Column(JSONB, nullable=True)
+    escala = Column(Float, nullable=True)
+    creado_en = Column(Date, nullable=False, server_default=func.current_date())
+    altura_h = Column(Float, nullable=True)
+    id_modelo2d = Column(
+        Integer,
+        ForeignKey('modelo2d.id_modelo2d', ondelete='CASCADE'),
+        nullable=False,
+        unique=True,  # relación 1:1 con modelo2d
+    )
+    vista_defecto = Column(JSONB, nullable=True)
+    actualizado_en = Column(DateTime, nullable=True)  # timestamp sin zona horaria

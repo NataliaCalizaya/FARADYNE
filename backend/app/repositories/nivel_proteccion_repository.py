@@ -1,76 +1,84 @@
 from typing import Any, Dict, Optional
-from app.core.database import execute_query, fetch_one, serialize_json
+
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
+
+from app.models.nivel_de_proteccion import NivelDeProteccion
+from app.models.proyecto import Proyecto
+from app.models.zona_ceraunica import ZonaCeraunica
+from app.repositories.utils import execute_returning_one, to_dict
 
 
 class NivelProteccionRepository:
- 
+
     @staticmethod
-    def get_proyecto_by_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
-        """Fetch de la fila completa de 'proyecto' por id_proyecto."""
-        query = "SELECT * FROM proyecto WHERE id_proyecto = %s;"
-        return fetch_one(query, (id_proyecto,))
- 
+    def get_proyecto_by_id(db: Session, id_proyecto: int) -> Optional[Dict[str, Any]]:
+        """Fila completa de 'proyecto' por id_proyecto."""
+        return to_dict(db.get(Proyecto, id_proyecto))
+
     @staticmethod
-    def get_ubicacion_by_proyecto_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
+    def get_ubicacion_by_proyecto_id(db: Session, id_proyecto: int) -> Optional[Dict[str, Any]]:
         """Trae solo id/nombre/ubicacion del proyecto.
- 
+
         Se usa para mostrar la ubicación junto al Ng adoptado en el Paso 1
         del cálculo de Nivel de Protección (HU04), sin traer la fila entera.
         """
-        query = """
-            SELECT id_proyecto, nombre, ubicacion
-            FROM proyecto
-            WHERE id_proyecto = %s;
-        """
-        return fetch_one(query, (id_proyecto,))
-    @staticmethod
-    def get_zona_ceraunica_by_id(id_zona: str) -> Optional[Dict[str, Any]]:
-        """Fetch zona_ceraunica entry by primary key ID id_zona."""
-        query = "SELECT * FROM zona_ceraunica WHERE id_zona = %s;"
-        return fetch_one(query, (id_zona,))
+        stmt = select(Proyecto.id_proyecto, Proyecto.nombre, Proyecto.ubicacion).where(
+            Proyecto.id_proyecto == id_proyecto
+        )
+        row = db.execute(stmt).mappings().first()
+        return dict(row) if row else None
 
     @staticmethod
-    def get_zona_ceraunica_by_departamento(id_proyecto: str) -> Optional[Dict[str, Any]]:
+    def get_zona_ceraunica_by_id(db: Session, id_zona: int) -> Optional[Dict[str, Any]]:
+        """Zona ceráunica por PK (columnas: id_zona, nombre, ng, ciudad)."""
+        return to_dict(db.get(ZonaCeraunica, id_zona))
+
+    @staticmethod
+    def get_zona_ceraunica_by_departamento(db: Session, id_proyecto: int) -> Optional[Dict[str, Any]]:
         """Busca la zona ceráunica (y su Ng) a partir de la localidad real
         cargada en el proyecto (proyecto.localidad), matcheando contra
         zona_ceraunica.ciudad.
 
-        Reemplaza el comportamiento anterior, que insertaba una fila
-        "por defecto" en zona_ceraunica con Ng=2.5 hardcodeado cuando no
-        había match. Ahora, si la localidad del proyecto no matchea
-        ninguna zona real, se devuelve None y el llamador debe informar
-        el error en vez de inventar un Ng.
+        (El nombre del método es histórico: zona_ceraunica no tiene columna
+        'departamento', el match se hace por localidad/ciudad.)
+
+        Si la localidad del proyecto no matchea ninguna zona real, devuelve
+        None y el llamador debe informar el error en vez de inventar un Ng.
         """
-        query = """
-            SELECT z.*
-            FROM proyecto p
-            JOIN zona_ceraunica z
-              ON LOWER(z.ciudad) = LOWER(p.localidad)
-            WHERE p.id_proyecto = %s
-            LIMIT 1;
-        """
-        return fetch_one(query, (id_proyecto,))
+        stmt = (
+            select(ZonaCeraunica)
+            .select_from(Proyecto)
+            .join(
+                ZonaCeraunica,
+                func.lower(ZonaCeraunica.ciudad) == func.lower(Proyecto.localidad),
+            )
+            .where(Proyecto.id_proyecto == id_proyecto)
+            .limit(1)
+        )
+        return to_dict(db.scalars(stmt).first())
 
     @staticmethod
-    def get_dimensiones_by_proyecto_id(id_proyecto: str) -> Optional[Dict[str, Any]]:
+    def get_dimensiones_by_proyecto_id(db: Session, id_proyecto: int) -> Optional[Dict[str, Any]]:
         """L/W/H ya calculadas y persistidas para el proyecto, si existen.
 
         Se usa para no tener que volver a leer/parsear el Modelo3D en cada
         cálculo de HU04: si el proyecto ya tiene un registro guardado, se
         reusan esas dimensiones."""
-        query = """
-            SELECT longitud_edificacion, anchura_edificacion, altura_edificacion
-            FROM nivel_de_proteccion
-            WHERE id_proyecto = %s
-            ORDER BY id_nivel_proteccion DESC
-            LIMIT 1;
-        """
-        return fetch_one(query, (id_proyecto,))
+        stmt = select(
+            NivelDeProteccion.longitud_edificacion,
+            NivelDeProteccion.anchura_edificacion,
+            NivelDeProteccion.altura_edificacion,
+        ).where(NivelDeProteccion.id_proyecto == id_proyecto)
+        row = db.execute(stmt).mappings().first()
+        return dict(row) if row else None
 
     @staticmethod
     def save_nivel_proteccion(
-        id_proyecto: str,
-        id_zona: Optional[str],
+        db: Session,
+        id_proyecto: int,
+        id_zona: Optional[int],
         nivel_proteccion: str,
         nivel_proteccion_recomendado: str,
         nd: float,
@@ -84,11 +92,14 @@ class NivelProteccionRepository:
         anchura_edificacion: float,
         altura_edificacion: float,
     ) -> Dict[str, Any]:
-        """Insert or update calculated protection level entry for project in
-        table 'nivel_de_proteccion'.
+        """Inserta o actualiza el nivel de protección calculado del proyecto.
+
+        nivel_de_proteccion.id_proyecto es UNIQUE (un cálculo por proyecto),
+        por eso es un único upsert atómico.
 
         `nivel_proteccion` = nivel finalmente elegido (recomendado o el que
-        el usuario haya seleccionado libremente en la grilla).
+        el usuario haya seleccionado en la grilla). La BD solo acepta
+        'I', 'II', 'III' o 'IV' (CHECK).
         `nivel_proteccion_recomendado` = lo que dio el procedimiento F.1, se
         guarda aparte para no perder esa info si el usuario elige otro nivel.
         `factor_a_e` es JSONB: {"a":.., "b":.., "c":.., "d":.., "e":..}.
@@ -96,91 +107,36 @@ class NivelProteccionRepository:
         tener que volver a pedirle las dimensiones al Modelo3D en cada
         cálculo o GET posterior.
         """
-        factor_a_e_json = serialize_json(factor_a_e)
-
-        check_query = "SELECT id_nivel_proteccion FROM nivel_de_proteccion WHERE id_proyecto = %s LIMIT 1;"
-        existing = fetch_one(check_query, (id_proyecto,))
-
-        if existing:
-            update_query = """
-                UPDATE nivel_de_proteccion
-                SET id_zona = %s,
-                    nivel_proteccion = %s,
-                    nivel_proteccion_recomendado = %s,
-                    nd = %s,
-                    nc = %s,
-                    ae = %s,
-                    eficiencia_minima = %s,
-                    radio_esfera = %s,
-                    factor_a_e = %s,
-                    margen_lateral = %s,
-                    longitud_edificacion = %s,
-                    anchura_edificacion = %s,
-                    altura_edificacion = %s
-                WHERE id_nivel_proteccion = %s
-                RETURNING *;
-            """
-            params = (
-                id_zona,
-                nivel_proteccion,
-                nivel_proteccion_recomendado,
-                nd,
-                nc,
-                ae,
-                eficiencia_minima,
-                radio_esfera,
-                factor_a_e_json,
-                margen_lateral,
-                longitud_edificacion,
-                anchura_edificacion,
-                altura_edificacion,
-                existing["id_nivel_proteccion"],
-            )
-            res = execute_query(update_query, params, fetch=True)
-            return res[0] if isinstance(res, list) and res else (res if res else {})
-        else:
-            insert_query = """
-                INSERT INTO nivel_de_proteccion (
-                    id_proyecto, id_zona, nivel_proteccion, nivel_proteccion_recomendado,
-                    nd, nc, ae, eficiencia_minima, radio_esfera, factor_a_e, margen_lateral,
-                    longitud_edificacion, anchura_edificacion, altura_edificacion
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING *;
-            """
-            params = (
-                id_proyecto,
-                id_zona,
-                nivel_proteccion,
-                nivel_proteccion_recomendado,
-                nd,
-                nc,
-                ae,
-                eficiencia_minima,
-                radio_esfera,
-                factor_a_e_json,
-                margen_lateral,
-                longitud_edificacion,
-                anchura_edificacion,
-                altura_edificacion,
-            )
-            res = execute_query(insert_query, params, fetch=True)
-            return res[0] if isinstance(res, list) and res else (res if res else {})
+        stmt = pg_insert(NivelDeProteccion).values(
+            id_proyecto=id_proyecto,
+            id_zona=id_zona,
+            nivel_proteccion=nivel_proteccion,
+            nivel_proteccion_recomendado=nivel_proteccion_recomendado,
+            nd=nd,
+            nc=nc,
+            ae=ae,
+            eficiencia_minima=eficiencia_minima,
+            radio_esfera=radio_esfera,
+            factor_a_e=factor_a_e,
+            margen_lateral=margen_lateral,
+            longitud_edificacion=longitud_edificacion,
+            anchura_edificacion=anchura_edificacion,
+            altura_edificacion=altura_edificacion,
+        )
+        columnas_a_actualizar = (
+            "id_zona", "nivel_proteccion", "nivel_proteccion_recomendado",
+            "nd", "nc", "ae", "eficiencia_minima", "radio_esfera", "factor_a_e",
+            "margen_lateral", "longitud_edificacion", "anchura_edificacion",
+            "altura_edificacion",
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["id_proyecto"],
+            set_={col: getattr(stmt.excluded, col) for col in columnas_a_actualizar},
+        ).returning(NivelDeProteccion.__table__)
+        return execute_returning_one(db, stmt)
 
     @staticmethod
-    def get_nivel_proteccion_by_proyecto_id(
-        id_proyecto: str
-    ) -> Optional[Dict[str, Any]]:
-        """Obtiene el nivel de protección y el radio de esfera guardados para el proyecto."""
-
-        query = """
-            SELECT
-                nivel_proteccion,
-                radio_esfera
-            FROM nivel_de_proteccion
-            WHERE id_proyecto = %s
-            ORDER BY id_nivel_proteccion DESC
-            LIMIT 1;
-        """
-
-        return fetch_one(query, (id_proyecto,))
+    def get_nivel_proteccion_by_proyecto_id(db: Session, id_proyecto: int) -> Optional[Dict[str, Any]]:
+        """Cálculo guardado del proyecto (id_proyecto es UNIQUE: a lo sumo una fila)."""
+        stmt = select(NivelDeProteccion).where(NivelDeProteccion.id_proyecto == id_proyecto)
+        return to_dict(db.scalars(stmt).first())

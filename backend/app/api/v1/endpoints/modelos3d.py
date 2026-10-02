@@ -1,5 +1,10 @@
 from typing import Any, Dict
-from fastapi import APIRouter, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.api.v1.endpoints.common import to_int
+from app.core.database import get_db
 from app.repositories.modelo3d_repository import Modelo3DRepository
 from app.repositories.plano_repository import PlanoRepository
 from app.schemas.modelo3d_schema import (
@@ -12,153 +17,110 @@ from app.services.model3d_generator_service import Model3DGeneratorService
 
 router = APIRouter(prefix="/modelos3d", tags=["HU03 - Modelo 3D"])
 
+VISTA_DEFECTO = {"camera": [50, 50, 50], "target": [0, 0, 0]}
+
+
+def _id_proyecto_de_modelo2d(db: Session, id_modelo2d: int) -> str:
+    """modelo3d -> modelo2d -> plano -> proyecto ('' si la cadena está cortada)."""
+    modelo2d = PlanoRepository.get_modelo2d_by_id(db, id_modelo2d)
+    if not modelo2d or not modelo2d.get("id_plano"):
+        return ""
+    plano = PlanoRepository.get_plano_by_id(db, modelo2d["id_plano"])
+    return str(plano["id_proyecto"]) if plano else ""
+
+
+def _respuesta(modelo3d: Dict[str, Any], id_proyecto: str) -> Dict[str, Any]:
+    return {
+        "id": str(modelo3d["id_modelo3d"]),
+        "id_modelo2d": str(modelo3d["id_modelo2d"]),
+        "id_proyecto": id_proyecto,
+        "geometria_volumetrica": modelo3d.get("geometria_volumetrica") or {},
+        "vista_defecto": modelo3d.get("vista_defecto") or dict(VISTA_DEFECTO),
+        "creado_en": modelo3d.get("creado_en"),
+        "actualizado_en": modelo3d.get("actualizado_en"),
+    }
+
+
 @router.post("", response_model=Modelo3DResponse, status_code=status.HTTP_201_CREATED)
-def create_modelo3d(payload: Modelo3DCreateRequest) -> Dict[str, Any]:
-    """HU03: Trigger deterministic programmatic 3D volumetric extrusion from 2D model ID."""
-    
-    # 1. Obtenemos el Modelo 2D
-    modelo2d = PlanoRepository.get_modelo2d_by_id(payload.id_modelo2d)
+def create_modelo3d(payload: Modelo3DCreateRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """HU03: extrusión volumétrica 3D determinista a partir de un Modelo 2D."""
+    id_modelo2d = to_int(payload.id_modelo2d, "id_modelo2d")
+
+    modelo2d = PlanoRepository.get_modelo2d_by_id(db, id_modelo2d)
     if not modelo2d:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No se encontró el Modelo 2D con ID '{payload.id_modelo2d}'.",
+            detail=f"No se encontró el Modelo 2D con ID '{id_modelo2d}'.",
         )
-
     if not modelo2d.get("validado"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La geometría 2D debe estar validada antes de generar el modelo 3D.",
         )
 
-    # 2. Buscamos el Proyecto viajando a través del Plano (Respetando la BD normalizada)
-    id_plano = modelo2d.get("id_plano")
-    plano_db = PlanoRepository.get_plano_by_id(id_plano)
-    
-    # Si por algún motivo falla, dejamos un fallback seguro
-    id_proyecto = str(plano_db.get("id_proyecto", "1")) if plano_db else "1"
-
-    # 3. Generación determinista
     mesh_data = Model3DGeneratorService.generate_3d_mesh_from_2d(modelo2d)
-    vista_defecto = mesh_data.get("vista_defecto", {"camera": [50, 50, 50], "target": [0, 0, 0]})
-    # 4. Lógica Upsert directa (Aprovecha el ON CONFLICT DO UPDATE del SQL)
-    # Ya no hace falta consultar si existe primero, la base de datos lo resuelve.
+    vista_defecto = mesh_data.get("vista_defecto") or dict(VISTA_DEFECTO)
+
+    # Upsert (modelo3d.id_modelo2d es UNIQUE): regenera si ya existía.
     modelo3d_db = Modelo3DRepository.create_modelo3d(
-        id_modelo2d=payload.id_modelo2d,
+        db,
+        id_modelo2d=id_modelo2d,
         geometria_volumetrica=mesh_data,
         vista_defecto=vista_defecto,
     )
-    # if modelo3d_existente:
-    #     id_existente = modelo3d_existente.get("id_modelo3d", modelo3d_existente.get("id"))
-    #     modelo3d_db = Modelo3DRepository.update_modelo3d(
-    #         id_modelo3d=id_existente,
-    #         geometria_volumetrica=mesh_data,
-    #         vista_defecto=vista_defecto,
-    #     )
-    # else:
-    #     # Se quitó id_proyecto de aquí porque no existe en la tabla modelo3d
-    #     modelo3d_db = Modelo3DRepository.create_modelo3d(
-    #         id_modelo2d=payload.id_modelo2d,
-    #         geometria_volumetrica=mesh_data,
-    #         vista_defecto=vista_defecto,
-    #     )
-
-    id_3d = str(modelo3d_db.get("id_modelo3d", modelo3d_db.get("id", "")))
-    id_2d = str(modelo3d_db.get("id_modelo2d", payload.id_modelo2d))
-
-    return {
-        "id": id_3d,
-        "id_modelo2d": id_2d,
-        "id_proyecto": id_proyecto, # Se lo devolvemos al frontend porque lo exige la respuesta
-        "geometria_volumetrica": modelo3d_db.get("geometria_volumetrica", {}),
-        "vista_defecto": vista_defecto,
-        "creado_en": modelo3d_db.get("creado_en"),
-        "actualizado_en": modelo3d_db.get("actualizado_en"),
-    }
+    return _respuesta(modelo3d_db, _id_proyecto_de_modelo2d(db, id_modelo2d))
 
 
 @router.get("/by-modelo2d/{id_modelo2d}", response_model=Modelo3DResponse)
-def get_modelo3d_by_modelo2d(id_modelo2d: str) -> Dict[str, Any]:
-    """Obtiene el Modelo 3D asociado a un Modelo 2D (si existe)."""
-    modelo3d = Modelo3DRepository.get_modelo3d_by_modelo2d_id(id_modelo2d)
+def get_modelo3d_by_modelo2d(id_modelo2d: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Modelo 3D asociado a un Modelo 2D (si existe)."""
+    modelo3d = Modelo3DRepository.get_modelo3d_by_modelo2d_id(db, id_modelo2d)
     if not modelo3d:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No se encontró un Modelo 3D para el Modelo 2D '{id_modelo2d}'.",
         )
-
-    id_3d = str(modelo3d.get("id_modelo3d", modelo3d.get("id", "")))
-    id_2d = str(modelo3d.get("id_modelo2d", id_modelo2d))
-
-    id_proyecto = ""
-    if id_2d:
-        modelo2d = PlanoRepository.get_modelo2d_by_id(id_2d)
-        if modelo2d and modelo2d.get("id_plano"):
-            plano_db = PlanoRepository.get_plano_by_id(modelo2d["id_plano"])
-            id_proyecto = str(plano_db.get("id_proyecto", "")) if plano_db else ""
-
-    return {
-        "id": id_3d,
-        "id_modelo2d": id_2d,
-        "id_proyecto": id_proyecto,
-        "geometria_volumetrica": modelo3d.get("geometria_volumetrica", {}),
-        "vista_defecto": modelo3d.get("vista_defecto", {"camera": [50, 50, 50], "target": [0, 0, 0]}),
-        "creado_en": modelo3d.get("creado_en"),
-        "actualizado_en": modelo3d.get("actualizado_en"),
-    }
+    return _respuesta(modelo3d, _id_proyecto_de_modelo2d(db, id_modelo2d))
 
 
 @router.get("/{id}", response_model=Modelo3DResponse)
-def get_modelo3d(id: str) -> Dict[str, Any]:
-    """HU03: Retrieve generated 3D geometry for model viewer."""
-    modelo3d = Modelo3DRepository.get_modelo3d_by_id(id)
+def get_modelo3d(id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """HU03: geometría 3D generada para el visor."""
+    modelo3d = Modelo3DRepository.get_modelo3d_by_id(db, id)
     if not modelo3d:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No se encontró el Modelo 3D con ID '{id}'.",
         )
+    return _respuesta(modelo3d, _id_proyecto_de_modelo2d(db, modelo3d["id_modelo2d"]))
 
-    id_3d = str(modelo3d.get("id_modelo3d", modelo3d.get("id", id)))
-    id_2d = str(modelo3d.get("id_modelo2d", ""))
-
-    id_proyecto = ""
-    if id_2d:
-        modelo2d = PlanoRepository.get_modelo2d_by_id(id_2d)
-        if modelo2d and modelo2d.get("id_plano"):
-            plano_db = PlanoRepository.get_plano_by_id(modelo2d["id_plano"])
-            id_proyecto = str(plano_db.get("id_proyecto", "")) if plano_db else ""
-    
-
-    return {
-        "id": id_3d,
-        "id_modelo2d": id_2d,
-        "id_proyecto": id_proyecto, # Ahora devuelve el ID real
-        "geometria_volumetrica": modelo3d.get("geometria_volumetrica", {}),
-        "vista_defecto": modelo3d.get("vista_defecto", {"camera": [50, 50, 50], "target": [0, 0, 0]}),
-        "creado_en": modelo3d.get("creado_en"),
-        "actualizado_en": modelo3d.get("actualizado_en"),
-    }
 
 @router.patch("/{id}/reset-view", response_model=ResetViewResponse)
-def reset_modelo3d_view(id: str, payload: ResetViewRequest = ResetViewRequest()) -> Dict[str, Any]:
-    """HU03: Reset 3D viewer default camera position and focus target."""
-    modelo3d = Modelo3DRepository.get_modelo3d_by_id(id)
+def reset_modelo3d_view(
+    id: int,
+    payload: ResetViewRequest = ResetViewRequest(),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """HU03: restablece cámara y target por defecto del visor 3D."""
+    modelo3d = Modelo3DRepository.get_modelo3d_by_id(db, id)
     if not modelo3d:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No se encontró el Modelo 3D con ID '{id}'.",
         )
 
-    default_view = modelo3d.get("vista_defecto", {"camera": [50, 50, 50], "target": [0, 0, 0]})
+    # dict() copia: si se muta el mismo objeto JSONB que tiene el ORM,
+    # SQLAlchemy no detecta el cambio y no emite el UPDATE.
+    default_view = dict(modelo3d.get("vista_defecto") or VISTA_DEFECTO)
     if payload.camera:
         default_view["camera"] = payload.camera
     if payload.target:
         default_view["target"] = payload.target
 
-    updated_db = Modelo3DRepository.update_vista_defecto(id, default_view)
+    updated_db = Modelo3DRepository.update_vista_defecto(db, id, default_view)
 
     return {
-        "id": id,
-        "vista_defecto": updated_db.get("vista_defecto", default_view) if updated_db else default_view,
+        "id": str(id),
+        "vista_defecto": (updated_db or {}).get("vista_defecto", default_view),
         "mensaje": "Vista restablecida a su posición por defecto correctamente.",
     }
-
