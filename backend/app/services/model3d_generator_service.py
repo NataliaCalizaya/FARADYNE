@@ -399,6 +399,7 @@ def add_prism_with_roof(region: Dict[str, Any]) -> Dict[str, Any]:
     # TAPAS SUPERIOR E INFERIOR
     # Shapely triangula y se conservan únicamente los triángulos
     # completamente cubiertos por la huella 2D original (polígonos cóncavos).
+
     for triangle in triangulate(poly):
         if not poly.covers(triangle):
             continue
@@ -586,13 +587,16 @@ class Model3DGeneratorService:
 
         # BOUNDING BOX
         bbox = calculate_bbox(regions_3d)
-
         bx0, by0, bx1, by1 = bbox
 
         center_x = (bx0 + bx1) / 2.0
         center_y = (by0 + by1) / 2.0
-
         size = max(bx1 - bx0, by1 - by0, 20.0)
+        for region in regions_3d:
+            if "footprint" in region:
+                region["footprint"] = [
+                (x - center_x, y - center_y) for x, y in region["footprint"]
+                ]
 
         # PRISMAS
         prisms: List[Dict[str, Any]] = []
