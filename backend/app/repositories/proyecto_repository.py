@@ -88,9 +88,13 @@ class ProyectoRepository:
         return dict(row) if row else None
 
     @staticmethod
-    def list_proyectos(db: Session) -> List[Dict[str, Any]]:
-        """Devuelve todos los proyectos, ordenados por fecha de creación desc."""
-        stmt = select(Proyecto).order_by(Proyecto.fecha_creacion.desc())
+    def list_proyectos(db: Session, id_usuario: int) -> List[Dict[str, Any]]:
+        """Devuelve los proyectos del usuario, ordenados por fecha de creación desc."""
+        stmt = (
+            select(Proyecto)
+            .where(Proyecto.id_usuario == id_usuario)   
+            .order_by(Proyecto.fecha_creacion.desc())
+        )
         return [to_dict(p) for p in db.scalars(stmt).all()]
 
     @staticmethod
@@ -105,6 +109,8 @@ class ProyectoRepository:
         provincia: Optional[str] = None,
         localidad: Optional[str] = None,
         estado: str = "borrador",
+        id_usuario: Optional[int] = None,
+
     ) -> Dict[str, Any]:
         """Crea un nuevo proyecto.
 
@@ -126,6 +132,8 @@ class ProyectoRepository:
             localidad=localidad,
             estado=estado,
             fecha_del_proyecto=_parse_fecha(fecha_del_proyecto),
+            id_usuario=id_usuario,
+
         )
         try:
             db.add(proyecto)

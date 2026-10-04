@@ -2,12 +2,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
-from app.core.config import settings
+from app.core.config import BASE_DIR, settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for FastAPI app startup and shutdown events."""
-    # Con SQLAlchemy, el engine maneja el pool de conexiones automáticamente.
+    # Aplica las migraciones pendientes de Alembic al arrancar (equivale a `alembic upgrade head`).
+    from alembic import command
+    from alembic.config import Config
+
+    command.upgrade(Config(str(BASE_DIR / "alembic.ini")), "head")
     yield
 
 app = FastAPI(

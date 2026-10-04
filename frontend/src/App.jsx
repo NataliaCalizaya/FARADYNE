@@ -2,26 +2,30 @@ import React, { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Workspace } from './components/Workspace';
 import { LoginForm } from './components/auth/LoginForm';
+import { RegisterForm } from './components/auth/RegisterForm';
+import { TOKEN_KEY, USER_KEY } from './api/client';
 import { Zap } from 'lucide-react';
-
-// Clave de localStorage para persistir la sesión entre recargas
-const AUTH_KEY = 'faradyne_auth';
 
 export function App() {
   // Inicializa desde localStorage para que F5 no vuelva al login
   const [isAuthenticated, setIsAuthenticated] = useState(
-    () => localStorage.getItem(AUTH_KEY) === 'true'
+    () => Boolean(localStorage.getItem(TOKEN_KEY))
   );
+  const [modoAuth, setModoAuth] = useState('login');
 
-  const handleLogin = () => {
-    localStorage.setItem(AUTH_KEY, 'true');
+
+  // data = respuesta de POST /auth/login: { access_token, token_type, usuario }
+  const handleLogin = (data) => {
+    localStorage.setItem(TOKEN_KEY, data.access_token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.usuario));
     setIsAuthenticated(true);
     // La URL del browser no cambia: si el usuario llegó a /proyecto/uuid/paso,
     // al autenticarse el router lo lleva directo a ese Workspace.
   };
 
   const handleLogout = () => {
-    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
     setIsAuthenticated(false);
   };
 
@@ -145,12 +149,28 @@ export function App() {
         <div className="w-full lg:w-[400px] bg-white flex items-center justify-center p-6 lg:p-10 shrink-0">
           <div className="w-full max-w-sm animate-fade-in">
             <h2 className="font-condensed font-bold text-2xl text-brand-dark mb-1">
-              Ingresar al sistema
+              {modoAuth === 'login' ? 'Ingresar al sistema' : 'Crear cuenta'}
             </h2>
             <p className="text-xs text-gray-500 mb-6">
-              Accedé con tus credenciales de proyectista.
+              {modoAuth === 'login'
+                ? 'Accedé con tus credenciales de proyectista.'
+                : 'Registrate para empezar a crear tus proyectos.'}
             </p>
-            <LoginForm onLogin={handleLogin} />
+            {modoAuth === 'login' ? (
+              <LoginForm onLogin={handleLogin} />
+            ) : (
+              <RegisterForm onLogin={handleLogin} />
+            )}
+            <p className="text-xs text-gray-500 mt-5 text-center">
+              {modoAuth === 'login' ? '¿No tenés cuenta? ' : '¿Ya tenés cuenta? '}
+              <button
+                type="button"
+                onClick={() => setModoAuth(modoAuth === 'login' ? 'registro' : 'login')}
+                className="text-brand-blue font-bold hover:underline"
+              >
+                {modoAuth === 'login' ? 'Crear cuenta' : 'Ingresar'}
+              </button>
+            </p>
           </div>
         </div>
       </div>

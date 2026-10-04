@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     UPLOAD_DIR: str = "./uploads"
 
+    # Auth Settings
+    SECRET_KEY: str = "faradyne-clave-solo-para-desarrollo-cambiar-en-produccion"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
