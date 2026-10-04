@@ -31,6 +31,22 @@ const COLOR_EDGE = 0x0284c7;
 const COLOR_HOVER = 0x22d3ee;
 const COLOR_SELECTED = 0xf59e0b;
 
+// Fondo (degradado vertical) y piso, según el tema
+const THEME = {
+  light: {
+    bgTop: '#f8fafc',
+    bgBottom: '#dbe4ee',
+    gridLine: 0x64748b,
+    gridFloor: 0xffffff,
+  },
+  dark: {
+    bgTop: '#1e293b',
+    bgBottom: '#0b1220',
+    gridLine: 0x94a3b8,
+    gridFloor: 0x1e293b,
+  },
+};
+
 // Azul (bajo) -> rojo (alto). Mismo mapeo que heightColor().
 const LEGEND_GRADIENT = `linear-gradient(to top, ${[0, 0.25, 0.5, 0.75, 1]
   .map((t) => `hsl(${Math.round((1 - t) * 0.66 * 360)}, 85%, 52%)`)
@@ -61,8 +77,6 @@ const formatLevel = (v) => {
 };
 
 const tipoLabel = (tipo) => TIPO_CUBIERTA_LABEL[tipo] || tipo || '—';
-
-const toThree = (p) => new THREE.Vector3(p[0], p[2], -p[1]);
 
 function heightColor(t) {
   const c = new THREE.Color();
@@ -163,23 +177,122 @@ function collectLevelLabels(meta) {
   return out;
 }
 
-function makeLabelSprite(text, width, darkMode = true) {
+// ------------------------------------------------------------
+// Fondo con degradado vertical suave
+// ------------------------------------------------------------
+function makeBackgroundTexture(dark) {
+  const t = dark ? THEME.dark : THEME.light;
+  const cv = document.createElement('canvas');
+  cv.width = 2;
+  cv.height = 512;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, t.bgTop);
+  g.addColorStop(1, t.bgBottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 2, 512);
+
+  const tex = new THREE.CanvasTexture(cv);
+  if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
+}
+
+// ------------------------------------------------------------
+// Piso: grilla fina que se desvanece hacia los bordes
+// (un solo plano con shader; reemplaza al GridHelper)
+// ------------------------------------------------------------
+function buildGridMesh(size, dark) {
+  const t = dark ? THEME.dark : THEME.light;
+  const cell = size > 60 ? 5 : 1;
+  const radius = size * 1.6;
+
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uLine: { value: new THREE.Color(t.gridLine) },
+      uFloor: { value: new THREE.Color(t.gridFloor) },
+      uCell: { value: cell },
+      uRadius: { value: radius },
+    },
+    vertexShader: `
+      varying vec3 vW;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vW = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uLine;
+      uniform vec3 uFloor;
+      uniform float uCell;
+      uniform float uRadius;
+      varying vec3 vW;
+
+      float gridLine(vec2 p, float cell) {
+        vec2 c = p / cell;
+        vec2 g = abs(fract(c - 0.5) - 0.5) / fwidth(c);
+        return 1.0 - min(min(g.x, g.y), 1.0);
+      }
+
+      void main() {
+        vec2 p = vW.xz;
+        float minor = gridLine(p, uCell);
+        float major = gridLine(p, uCell * 5.0);
+
+        float d = length(p) / uRadius;
+        float fade = 1.0 - smoothstep(0.2, 1.0, d);
+
+        float floorA = 0.6 * fade;
+        float lineA = (minor * 0.16 + major * 0.30) * fade;
+
+        vec3 col = mix(uFloor, uLine, clamp(lineA / (floorA + lineA + 0.0001), 0.0, 1.0));
+        float a = clamp(floorA + lineA, 0.0, 1.0);
+
+        gl_FragColor = vec4(col, a);
+        gl_FragColor = linearToOutputTexel(gl_FragColor);
+      }
+    `,
+  });
+
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(radius * 2, radius * 2), material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = -0.02;
+  mesh.renderOrder = -1;
+  mesh.name = 'floor_grid';
+  return mesh;
+}
+
+function applyGridTheme(mesh, dark) {
+  if (!mesh || !mesh.material || !mesh.material.uniforms) return;
+  const t = dark ? THEME.dark : THEME.light;
+  mesh.material.uniforms.uLine.value.set(t.gridLine);
+  mesh.material.uniforms.uFloor.value.set(t.gridFloor);
+}
+
+// ------------------------------------------------------------
+// Cotas (sprites)
+// ------------------------------------------------------------
+function makeLabelTexture(text, darkMode = false) {
   const cv = document.createElement('canvas');
   cv.width = 256;
   cv.height = 96;
   const ctx = cv.getContext('2d');
   if (!ctx) return null;
-  ctx.fillStyle = darkMode ? 'rgba(15, 23, 42, 0.90)' : 'rgba(255, 255, 255, 0.92)';
+
+  ctx.fillStyle = darkMode ? 'rgba(15, 23, 42, 0.90)' : 'rgba(255, 255, 255, 0.95)';
   ctx.strokeStyle = '#0284c7';
   ctx.lineWidth = 5;
-  const r = 18;
   ctx.beginPath();
-  ctx.roundRect(4, 4, 248, 88, r);
+  if (ctx.roundRect) ctx.roundRect(4, 4, 248, 88, 18);
+  else ctx.rect(4, 4, 248, 88);
   ctx.fill();
   ctx.stroke();
 
-  ctx.shadowColor = darkMode ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-  ctx.shadowBlur = 4;
   ctx.fillStyle = darkMode ? '#f8fafc' : '#0f172a';
   ctx.font = 'bold 42px sans-serif';
   ctx.textAlign = 'center';
@@ -188,6 +301,12 @@ function makeLabelSprite(text, width, darkMode = true) {
 
   const texture = new THREE.CanvasTexture(cv);
   texture.minFilter = THREE.LinearFilter;
+  return texture;
+}
+
+function makeLabelSprite(text, width, darkMode = false) {
+  const texture = makeLabelTexture(text, darkMode);
+  if (!texture) return null;
 
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({
@@ -200,6 +319,7 @@ function makeLabelSprite(text, width, darkMode = true) {
 
   sprite.scale.set(width, (width * 96) / 256, 1);
   sprite.renderOrder = 10;
+  sprite.userData.text = text;
   return sprite;
 }
 
@@ -212,7 +332,7 @@ function buildPrismMesh(prism, tOf, opacity, centerOffset = { x: 0, y: 0 }) {
   prism.faces.forEach((face) => {
     const pts = face.points;
     if (!pts || pts.length < 3) return;
-    const v = pts.map((p) => 
+    const v = pts.map((p) =>
       new THREE.Vector3(p[0] - centerOffset.x, p[2], -(p[1] - centerOffset.y))
     );
     const zTop = Math.max(...pts.map((p) => p[2]));
@@ -273,8 +393,8 @@ const Chip = ({ active, onClick, title, children }) => (
     title={title}
     aria-pressed={active}
     className={`px-2 py-1 rounded border text-[11px] font-semibold transition ${active
-        ? 'bg-slate-600 border-brand-blue text-white'
-        : 'bg-slate-700/60 border-slate-600 text-slate-400 hover:text-white'
+      ? 'bg-slate-600 border-brand-blue text-white'
+      : 'bg-slate-700/60 border-slate-600 text-slate-400 hover:text-white'
       }`}
   >
     {children}
@@ -330,17 +450,21 @@ export const Modelo3DViewer = ({
   const [showGrid, setShowGrid] = useState(true);
   const [showEdges, setShowEdges] = useState(true);
   const [showMasts, setShowMasts] = useState(true);
-  const [colorMode, setColorMode] = useState('altura'); // 'altura' | 'unico'
+  const [colorMode, setColorMode] = useState('unico'); // 'unico' | 'altura'
   const [opacity, setOpacity] = useState(0.85);
   const [autoRotate, setAutoRotate] = useState(false);
 
   // Interacción
   const [selectedId, setSelectedId] = useState(null);
-  const [darkMode, setDarkMode] = useState(true); // true = oscuro, false = claro
+  const [darkMode, setDarkMode] = useState(false); // arranca en modo claro
   const [tooltip, setTooltip] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [showHint, setShowHint] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Permite que la escena lea el tema actual sin reconstruirse al cambiarlo
+  const darkModeRef = useRef(darkMode);
+  darkModeRef.current = darkMode;
 
   // ----------------------------------------------------------
   // CARGA DEL MODELO
@@ -439,7 +563,7 @@ export const Modelo3DViewer = ({
     setView('iso');
     setSelectedId(null);
   };
-  
+
   const handleZoom = (factor) => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
@@ -497,7 +621,7 @@ export const Modelo3DViewer = ({
 
     // --- Escena, cámara, renderer ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f172a);
+    scene.background = makeBackgroundTexture(darkModeRef.current);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(
@@ -535,116 +659,108 @@ export const Modelo3DViewer = ({
     });
     scene.add(roofGroup);
 
-  // --- Tanque ---
-  if (metaData.tank) {
-    const t = metaData.tank;
-    const tank = new THREE.Mesh(
-      new THREE.BoxGeometry(t.width, t.top - t.base, t.depth),
-      new THREE.MeshStandardMaterial({
-        color: 0xe07a10, transparent: true, opacity: 0.85, roughness: 0.4,
-      })
-    );
-    tank.position.set(t.x - cx, (t.base + t.top) / 2, -(t.y - cy));
-    roofGroup.add(tank);
-  }
-
-  // --- Cotas de nivel (centradas) ---
-  const labelsGroup = new THREE.Group();
-  labelsGroup.name = 'labels';
-  const labelWidth = Math.min(Math.max(size * 0.05, 1.8), 7);
-
-  const polePositions = [];
-  const dotPositions = [];
-
-  collectLevelLabels(metaData).forEach(({ val, x, y }) => {
-    const sprite = makeLabelSprite(formatLevel(val), labelWidth, darkMode);
-    if (!sprite) return;
-    const yLabel = Math.max(val, 0) + 0.4; // Altura ligeramente despegada del techo
-    const posX = x - cx;
-    const posZ = -(y - cy);
-    sprite.position.set(posX, yLabel, posZ);
-    labelsGroup.add(sprite);
-    polePositions.push(posX, Math.max(val, 0), posZ, posX, yLabel, posZ);
-    dotPositions.push(posX, Math.max(val, 0) + 0.02, posZ);
-  });
-
-  if (polePositions.length) {
-    const poleGeo = new THREE.BufferGeometry();
-    poleGeo.setAttribute('position', new THREE.Float32BufferAttribute(polePositions, 3));
-    labelsGroup.add(
-      new THREE.LineSegments(
-        poleGeo,
-        new THREE.LineBasicMaterial({
-          color: 0x0284c7,
-          transparent: true,
-          opacity: 0.6,
-          linewidth: 2,
+    // --- Tanque ---
+    if (metaData.tank) {
+      const t = metaData.tank;
+      const tank = new THREE.Mesh(
+        new THREE.BoxGeometry(t.width, t.top - t.base, t.depth),
+        new THREE.MeshStandardMaterial({
+          color: 0xe07a10, transparent: true, opacity: 0.85, roughness: 0.4,
         })
-      )
-    );
-  }
-  if (dotPositions.length) {
-    const dotGeo = new THREE.BufferGeometry();
-    dotGeo.setAttribute('position', new THREE.Float32BufferAttribute(dotPositions, 3));
-    const dotMat = new THREE.PointsMaterial({
-      color: 0x38bdf8,
-      size: Math.min(Math.max(size * 0.015, 0.3), 1.2),
-      transparent: true,
-      opacity: 0.9,
+      );
+      tank.position.set(t.x - cx, (t.base + t.top) / 2, -(t.y - cy));
+      roofGroup.add(tank);
+    }
+
+    // --- Cotas de nivel (centradas) ---
+    const labelsGroup = new THREE.Group();
+    labelsGroup.name = 'labels';
+    const labelWidth = Math.min(Math.max(size * 0.05, 1.8), 7);
+
+    const polePositions = [];
+    const dotPositions = [];
+
+    collectLevelLabels(metaData).forEach(({ val, x, y }) => {
+      const sprite = makeLabelSprite(formatLevel(val), labelWidth, darkModeRef.current);
+      if (!sprite) return;
+      const yLabel = Math.max(val, 0) + 0.4; // Altura ligeramente despegada del techo
+      const posX = x - cx;
+      const posZ = -(y - cy);
+      sprite.position.set(posX, yLabel, posZ);
+      labelsGroup.add(sprite);
+      polePositions.push(posX, Math.max(val, 0), posZ, posX, yLabel, posZ);
+      dotPositions.push(posX, Math.max(val, 0) + 0.02, posZ);
     });
-    labelsGroup.add(new THREE.Points(dotGeo, dotMat));
-  }
-  scene.add(labelsGroup);
 
-  // --- Grilla en el origen (0,0) ---
-  const gridSize = Math.ceil((size * 1.5) / 5) * 5;
-  const grid = new THREE.GridHelper(
-    gridSize,
-    Math.max(2, Math.ceil(gridSize / 5)),
-    0x38bdf8,
-    0x334155
-  );
-  grid.position.set(0, -0.01, 0);
-  scene.add(grid);
+    if (polePositions.length) {
+      const poleGeo = new THREE.BufferGeometry();
+      poleGeo.setAttribute('position', new THREE.Float32BufferAttribute(polePositions, 3));
+      labelsGroup.add(
+        new THREE.LineSegments(
+          poleGeo,
+          new THREE.LineBasicMaterial({
+            color: 0x0284c7,
+            transparent: true,
+            opacity: 0.6,
+          })
+        )
+      );
+    }
+    if (dotPositions.length) {
+      const dotGeo = new THREE.BufferGeometry();
+      dotGeo.setAttribute('position', new THREE.Float32BufferAttribute(dotPositions, 3));
+      const dotMat = new THREE.PointsMaterial({
+        color: 0x38bdf8,
+        size: Math.min(Math.max(size * 0.015, 0.3), 1.2),
+        transparent: true,
+        opacity: 0.9,
+      });
+      labelsGroup.add(new THREE.Points(dotGeo, dotMat));
+    }
+    scene.add(labelsGroup);
 
-  groupsRef.current = { roof: roofGroup, labels: labelsGroup, grid, meshes };
+    // --- Piso: grilla fina con desvanecido radial ---
+    const grid = buildGridMesh(size, darkModeRef.current);
+    scene.add(grid);
 
-  // --- Vistas de Cámara reencuadradas al origen ---
-  roofGroup.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(roofGroup);
+    groupsRef.current = { roof: roofGroup, labels: labelsGroup, grid, meshes };
 
-  // Si por alguna razón el box está vacío, se usa un fallback seguro
-  const modelCenter = box.isEmpty() 
-    ? new THREE.Vector3(0, stats.zAll * 0.25, 0)
-    : box.getCenter(new THREE.Vector3());
+    // --- Vistas de Cámara reencuadradas al origen ---
+    roofGroup.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(roofGroup);
 
-  const boxSize = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(boxSize.x, boxSize.y, boxSize.z, size);
+    // Si por alguna razón el box está vacío, se usa un fallback seguro
+    const modelCenter = box.isEmpty()
+      ? new THREE.Vector3(0, stats.zAll * 0.25, 0)
+      : box.getCenter(new THREE.Vector3());
 
-  // Distancia calculada dinámicamente según el FOV de la cámara
-  const fovRad = (camera.fov * Math.PI) / 180;
-  let fitDist = Math.abs(maxDim / (2 * Math.tan(fovRad / 2))) * 1.4;
+    const boxSize = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(boxSize.x, boxSize.y, boxSize.z, size);
 
-  viewsRef.current = {
-    iso: {
-      pos: modelCenter.clone().add(new THREE.Vector3(1, 0.8, 1).normalize().multiplyScalar(fitDist)),
-      target: modelCenter.clone(),
-    },
-    top: {
-      pos: modelCenter.clone().add(new THREE.Vector3(0, fitDist, 0.001)),
-      target: modelCenter.clone(),
-    },
-    front: {
-      pos: modelCenter.clone().add(new THREE.Vector3(0, 0, fitDist)),
-      target: modelCenter.clone(),
-    },
-    side: {
-      pos: modelCenter.clone().add(new THREE.Vector3(fitDist, 0, 0)),
-      target: modelCenter.clone(),
-    },
-  };
+    // Distancia calculada dinámicamente según el FOV de la cámara
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const fitDist = Math.abs(maxDim / (2 * Math.tan(fovRad / 2))) * 0.85;
 
-  camera.position.copy(viewsRef.current.iso.pos);
+    viewsRef.current = {
+      iso: {
+        pos: modelCenter.clone().add(new THREE.Vector3(1, 0.8, 1).normalize().multiplyScalar(fitDist)),
+        target: modelCenter.clone(),
+      },
+      top: {
+        pos: modelCenter.clone().add(new THREE.Vector3(0, fitDist, 0.001)),
+        target: modelCenter.clone(),
+      },
+      front: {
+        pos: modelCenter.clone().add(new THREE.Vector3(0, 0, fitDist)),
+        target: modelCenter.clone(),
+      },
+      side: {
+        pos: modelCenter.clone().add(new THREE.Vector3(fitDist, 0, 0)),
+        target: modelCenter.clone(),
+      },
+    };
+
+    camera.position.copy(viewsRef.current.iso.pos);
 
     // --- Controles ---
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -687,9 +803,9 @@ export const Modelo3DViewer = ({
     focusRegionRef.current = (id) => {
       const mesh = meshes.find((m) => m.userData.id === id);
       if (!mesh) return;
-      const box = new THREE.Box3().setFromObject(mesh);
-      const c = box.getCenter(new THREE.Vector3());
-      const s = box.getSize(new THREE.Vector3());
+      const b = new THREE.Box3().setFromObject(mesh);
+      const c = b.getCenter(new THREE.Vector3());
+      const s = b.getSize(new THREE.Vector3());
       const d = Math.max(s.x, s.z, 4) * 1.6 + s.y;
       const dir = new THREE.Vector3(0.7, 0.65, 0.7).normalize();
       flyTo(c.clone().add(dir.multiplyScalar(d)), c);
@@ -853,6 +969,7 @@ export const Modelo3DViewer = ({
       disposeObject(roofGroup);
       disposeObject(labelsGroup);
       disposeObject(grid);
+      if (scene.background && scene.background.dispose) scene.background.dispose();
 
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
@@ -889,24 +1006,27 @@ export const Modelo3DViewer = ({
     if (refreshHighlightRef.current) refreshHighlightRef.current();
   }, [selectedId, sceneVersion]);
 
-  // Modo oscuro del modelo 3d
+  // Tema claro / oscuro: fondo, piso y cotas
   useEffect(() => {
     const scene = sceneRef.current;
     const groups = groupsRef.current;
     if (!scene) return;
-    const bgColor = darkMode ? 0x0f172a : 0xf1f5f9; // slate-900 u slate-100
-    scene.background = new THREE.Color(bgColor);
 
-    if (groups && groups.grid) {
-      const centerColor = darkMode ? 0x38bdf8 : 0x0284c7; // Azul brillante vs Azul medio
-      const gridColor = darkMode ? 0x334155 : 0xcbd5e1;   // Gris oscuro vs Gris claro
+    const oldBg = scene.background;
+    scene.background = makeBackgroundTexture(darkMode);
+    if (oldBg && oldBg.dispose) oldBg.dispose();
 
-      if (Array.isArray(groups.grid.material)) {
-        groups.grid.material[0].color.setHex(centerColor);
-        groups.grid.material[1].color.setHex(gridColor);
-      } else if (groups.grid.material) {
-        groups.grid.material.color.setHex(gridColor);
-      }
+    if (groups) {
+      applyGridTheme(groups.grid, darkMode);
+
+      groups.labels.traverse((obj) => {
+        if (obj.isSprite && obj.userData.text) {
+          const oldMap = obj.material.map;
+          obj.material.map = makeLabelTexture(obj.userData.text, darkMode);
+          obj.material.needsUpdate = true;
+          if (oldMap && oldMap.dispose) oldMap.dispose();
+        }
+      });
     }
   }, [sceneVersion, darkMode]);
 
@@ -989,15 +1109,13 @@ export const Modelo3DViewer = ({
   return (
     <div
       ref={containerRef}
-      className={`flex flex-col h-full w-full rounded-md overflow-hidden border relative shadow-inner transition-colors duration-300 ${
-        darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-300 text-slate-800'
-      }`}
+      className={`flex flex-col h-full w-full rounded-md overflow-hidden border relative shadow-inner transition-colors duration-300 ${darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-300 text-slate-800'
+        }`}
     >
       {/* Barra superior: vistas y acciones */}
       <div
-        className={`border-b px-3 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 z-10 transition-colors ${
-          darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
-        }`}
+        className={`border-b px-3 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 z-10 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+          }`}
       >
         <div className={`flex items-center gap-2 font-condensed font-bold text-xs ${darkMode ? 'text-white' : 'text-slate-800'}`}>
           <Box className="w-4 h-4 text-brand-blue" />
@@ -1011,29 +1129,32 @@ export const Modelo3DViewer = ({
           <ToolBtn onClick={() => setView('front')} title="Vista frontal">Frontal</ToolBtn>
           <ToolBtn onClick={() => setView('side')} title="Vista lateral">Lateral</ToolBtn>
           <span className={`w-px h-5 mx-1 ${darkMode ? 'bg-slate-600' : 'bg-slate-300'}`} />
-        
-          <ToolBtn onClick={() => setDarkMode((v) => !v)}
-            title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
+
+          <ToolBtn
+            onClick={() => setDarkMode((v) => !v)}
+            title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+          >
             {darkMode ? (
               <>
-                <Sun className="w-3 h-3 text-amber-400" /> Modo Claro</>
+                <Sun className="w-3 h-3 text-amber-400" /> Modo Claro
+              </>
             ) : (
               <>
-                <Moon className="w-3 h-3 text-indigo-500" /> Modo Oscuro</>
+                <Moon className="w-3 h-3 text-indigo-300" /> Modo Oscuro
+              </>
             )}
           </ToolBtn>
 
           <div className="flex items-center gap-1">
+            <ToolBtn onClick={() => handleZoom(0.8)} title="Acercar (+)">
+              <ZoomIn className="w-3.5 h-3.5" />
+            </ToolBtn>
+            <ToolBtn onClick={() => handleZoom(1.25)} title="Alejar (-)">
+              <ZoomOut className="w-3.5 h-3.5" />
+            </ToolBtn>
+          </div>
 
-          <ToolBtn onClick={() => handleZoom(0.8)} title="Acercar (+)">
-            <ZoomIn className="w-3.5 h-3.5" />
-          </ToolBtn>
-          <ToolBtn onClick={() => handleZoom(1.25)} title="Alejar (-)">
-            <ZoomOut className="w-3.5 h-3.5" />
-          </ToolBtn>
-        </div>
-
-        <span className={`w-px h-5 mx-1 ${darkMode ? 'bg-slate-600' : 'bg-slate-300'}`} />
+          <span className={`w-px h-5 mx-1 ${darkMode ? 'bg-slate-600' : 'bg-slate-300'}`} />
 
           <ToolBtn onClick={handleReset} title="Volver a la vista inicial">
             <RefreshCw className="w-3 h-3" /> Restablecer
@@ -1043,17 +1164,18 @@ export const Modelo3DViewer = ({
           </ToolBtn>
         </div>
       </div>
+
       <div
-        className={`border-b px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 z-10 transition-colors ${
-          darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-200/80 border-slate-300'
-        }`}>
+        className={`border-b px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 z-10 transition-colors ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-200/80 border-slate-300'
+          }`}
+      >
         <div className="flex items-center gap-1.5">
           <span className={`text-[11px] ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>Color:</span>
-          <Chip active={colorMode === 'altura'} onClick={() => setColorMode('altura')} title="Colorear según la altura">
-            Por altura
-          </Chip>
           <Chip active={colorMode === 'unico'} onClick={() => setColorMode('unico')} title="Un solo color">
             Único
+          </Chip>
+          <Chip active={colorMode === 'altura'} onClick={() => setColorMode('altura')} title="Colorear según la altura">
+            Por altura
           </Chip>
         </div>
 
@@ -1133,15 +1255,13 @@ export const Modelo3DViewer = ({
 
         {/* Panel de cubiertas */}
         {regionList.length > 0 && (
-          <div className={`absolute top-2 left-2 z-10 w-52 max-h-[60%] flex flex-col border rounded-md shadow-lg ${
-            darkMode ? 'bg-slate-800/95 border-slate-700' : 'bg-white/95 border-slate-300'
-          }`}>
+          <div className={`absolute top-2 left-2 z-10 w-52 max-h-[60%] flex flex-col border rounded-md shadow-lg ${darkMode ? 'bg-slate-800/95 border-slate-700' : 'bg-white/95 border-slate-300'
+            }`}>
             <button
               type="button"
               onClick={() => setPanelOpen((v) => !v)}
-              className={`flex items-center justify-between px-2.5 py-1.5 text-[11px] font-bold ${
-                darkMode ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'
-              }`}
+              className={`flex items-center justify-between px-2.5 py-1.5 text-[11px] font-bold ${darkMode ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'
+                }`}
               aria-expanded={panelOpen}
             >
               <span>Cubiertas ({regionList.length})</span>
@@ -1158,13 +1278,12 @@ export const Modelo3DViewer = ({
                         setSelectedId(r.id);
                         if (focusRegionRef.current) focusRegionRef.current(r.id);
                       }}
-                      className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] transition ${
-                        r.id === selectedId
-                          ? 'bg-amber-500/20 text-amber-500 font-semibold'
-                          : darkMode
+                      className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] transition ${r.id === selectedId
+                        ? 'bg-amber-500/20 text-amber-500 font-semibold'
+                        : darkMode
                           ? 'text-slate-300 hover:bg-slate-700'
                           : 'text-slate-600 hover:bg-slate-100'
-                      }`}
+                        }`}
                     >
                       <span className="flex items-center gap-1 truncate">
                         {r.sinNiveles && (
@@ -1185,9 +1304,8 @@ export const Modelo3DViewer = ({
 
         {/* Detalle de la cubierta seleccionada */}
         {selected && (
-          <div className={`absolute top-2 right-2 z-10 w-60 border border-amber-500/60 rounded-md shadow-lg text-[11px] ${
-            darkMode ? 'bg-slate-800/95 text-slate-200' : 'bg-white/95 text-slate-800'
-          }`}>
+          <div className={`absolute top-2 right-2 z-10 w-60 border border-amber-500/60 rounded-md shadow-lg text-[11px] ${darkMode ? 'bg-slate-800/95 text-slate-200' : 'bg-white/95 text-slate-800'
+            }`}>
             <div className={`flex items-center justify-between px-2.5 py-1.5 border-b ${darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
               <span className="font-bold truncate">{selected.id}</span>
               <button
@@ -1262,9 +1380,8 @@ export const Modelo3DViewer = ({
 
         {/* Leyenda de alturas */}
         {colorMode === 'altura' && regionList.length > 0 && !selected && (
-          <div className={`absolute top-2 right-2 z-10 flex items-stretch gap-1.5 border rounded-md px-2 py-1.5 text-[10px] pointer-events-none ${
-            darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-700'
-          }`}>
+          <div className={`absolute top-2 right-2 z-10 flex items-stretch gap-1.5 border rounded-md px-2 py-1.5 text-[10px] pointer-events-none ${darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-700'
+            }`}>
             <div className="w-2.5 h-24 rounded-sm" style={{ background: LEGEND_GRADIENT }} />
             <div className="flex flex-col justify-between">
               <span>{fmt(heightRange.zMax)} m</span>
@@ -1276,9 +1393,8 @@ export const Modelo3DViewer = ({
         {/* Tooltip al pasar el mouse */}
         {tooltip && (
           <div
-            className={`absolute z-20 pointer-events-none border rounded px-2 py-1.5 text-[11px] shadow-lg ${
-              darkMode ? 'bg-slate-900/95 border-slate-600 text-slate-100' : 'bg-white/95 border-slate-300 text-slate-800'
-            }`}
+            className={`absolute z-20 pointer-events-none border rounded px-2 py-1.5 text-[11px] shadow-lg ${darkMode ? 'bg-slate-900/95 border-slate-600 text-slate-100' : 'bg-white/95 border-slate-300 text-slate-800'
+              }`}
             style={{ left: tooltip.x, top: tooltip.y, maxWidth: 200 }}
           >
             <div className="font-bold truncate">{tooltip.id}</div>
@@ -1291,9 +1407,8 @@ export const Modelo3DViewer = ({
 
         {/* Ayuda de controles */}
         {showHint && model3dData && !loading && !error && (
-          <div className={`absolute bottom-2 left-2 z-10 flex items-start gap-2 border rounded-md px-2.5 py-1.5 text-[10px] max-w-[85%] ${
-            darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-600'
-          }`}>
+          <div className={`absolute bottom-2 left-2 z-10 flex items-start gap-2 border rounded-md px-2.5 py-1.5 text-[10px] max-w-[85%] ${darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-600'
+            }`}>
             <p>
               <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Arrastrar</strong> rota ·{' '}
               <strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Clic derecho</strong> mueve ·{' '}

@@ -4,7 +4,7 @@ import { CheckCircle2, Download, CloudUpload, FileText } from 'lucide-react';
 // TODO: conectar cuando exista el endpoint de Memoria Descriptiva e historial de versiones
 export const MemoriaDescriptiva = ({ projectData }) => {
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="w-full space-y-5 px-3">
       <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Memoria Descriptiva & Documento Final
       </h1>

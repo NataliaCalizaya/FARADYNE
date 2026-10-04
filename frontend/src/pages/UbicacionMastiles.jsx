@@ -352,7 +352,7 @@ export const UbicacionMastiles = ({
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
+    <div className="w-full space-y-5 px-3">
       {/* ── Título ── */}
       <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900" >
         Ubicación de Mástiles Captores
