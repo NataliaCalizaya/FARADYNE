@@ -17,6 +17,7 @@ import {
 } from 'react-konva';
 
 import {
+  GripHorizontal,
   CheckCircle,
   CheckCircle2,
   AlertTriangle,
@@ -45,6 +46,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
+import { useDraggable } from '../../hooks/useDraggable';
 import { planosApi } from '../../api/planos';
 import { modelos3dApi } from '../../api/modelos3d';
 
@@ -369,6 +371,9 @@ export const GeometriaViewer = ({
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Panel "Superficie / Nivel" arrastrable para que no tape el plano
+  const inspectorDrag = useDraggable();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [info, setInfo] = useState(null);
@@ -2015,8 +2020,19 @@ export const GeometriaViewer = ({
         {/* ---------- INSPECTOR CONTEXTUAL ---------- */}
 
         {(selectedPoly || selectedLevel) && (
-          <aside className="step-transition absolute right-3 top-3 z-20 w-72 max-h-[calc(100%-5.5rem)] overflow-y-auto bg-white/95 backdrop-blur rounded-2xl border border-gray-200 shadow-xl shadow-blue-900/10 divide-y divide-gray-100 text-xs">
+          <aside
+            ref={inspectorDrag.ref}
+            style={inspectorDrag.style}
+            className="absolute right-3 top-3 z-20 w-72 max-h-[calc(100%-5.5rem)] overflow-y-auto bg-white/95 backdrop-blur rounded-xl border border-gray-200 shadow-lg divide-y divide-gray-100 text-xs"
+          >
 
+            {/* Manija para arrastrar el panel */}
+            <div
+              {...inspectorDrag.handleProps}
+              className="sticky top-0 z-10 flex items-center justify-center py-1 bg-gray-50/95 rounded-t-xl text-gray-400 hover:text-gray-600 select-none"
+            >
+              <GripHorizontal className="w-4 h-4" />
+            </div>
             {selectedPoly && (
               <section className="p-3 space-y-3">
 
