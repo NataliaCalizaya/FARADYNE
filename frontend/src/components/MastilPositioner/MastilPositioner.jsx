@@ -1,7 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Trash2, Ruler, Palette, Pencil, X, Check } from 'lucide-react';
 import { ALTURA_STEPS, getMastColor, MAST_COLOR_LEGEND } from '../../hooks/utilsMastilVisual';
 import { SelectField } from '../ui/SelectField';
+
+/**
+ * Motivos por los que una terna/cuaterna o una unión no admite esfera.
+ * `label` es el texto largo; `corto` el título de la columna.
+ * (Las clases se escriben completas para que Tailwind las detecte.)
+ */
+const MOTIVOS = {
+  sin_esfera_radio_insuficiente: {
+    label: 'mástiles muy separados para este radio', corto: 'Muy separados',
+    head: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500',
+  },
+  sin_esfera_puntas_colineales: {
+    label: 'mástiles alineados', corto: 'Alineados',
+    head: 'bg-orange-100 text-orange-800 border-orange-300', dot: 'bg-orange-500',
+  },
+  sin_esfera_no_apoyable: {
+    label: 'diferencia de alturas excesiva', corto: 'Alturas dispares',
+    head: 'bg-red-100 text-red-800 border-red-300', dot: 'bg-red-500',
+  },
+  sin_esfera_toca_suelo: {
+    label: 'la esfera llega al suelo', corto: 'Toca el suelo',
+    head: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500',
+  },
+  sin_esfera_toca_cubierta: {
+    label: 'la esfera toca la cubierta', corto: 'Toca la cubierta',
+    head: 'bg-purple-100 text-purple-800 border-purple-300', dot: 'bg-purple-500',
+  },
+  sin_union_no_apoyable: {
+    label: 'la esfera no puede pivotar entre estos mástiles', corto: 'Unión no apoyable',
+    head: 'bg-sky-100 text-sky-800 border-sky-300', dot: 'bg-sky-500',
+  },
+  sin_union_toca_suelo: {
+    label: 'la unión llega al suelo', corto: 'Unión toca suelo',
+    head: 'bg-pink-100 text-pink-800 border-pink-300', dot: 'bg-pink-500',
+  },
+  sin_union_toca_cubierta: {
+    label: 'la unión toca la cubierta', corto: 'Unión toca cubierta',
+    head: 'bg-violet-100 text-violet-800 border-violet-300', dot: 'bg-violet-500',
+  },
+};
+
+const MOTIVO_DESCONOCIDO = {
+  label: 'motivo no especificado', corto: 'Otros',
+  head: 'bg-gray-100 text-gray-700 border-gray-300', dot: 'bg-gray-400',
+};
+
+const motivoInfo = (motivo) => MOTIVOS[motivo] || { ...MOTIVO_DESCONOCIDO, corto: motivo || 'Otros' };
+
 /**
  * MastilPositioner
  *
@@ -10,6 +58,9 @@ import { SelectField } from '../ui/SelectField';
  * geometría 2D, solo expone controles de altura, la leyenda de colores y
  * la lista de mástiles colocados (con edición de altura, borrado y
  * selección para resaltarlos en los visores).
+ *
+ * La sección "Piezas sin esfera posible" se divide en columnas según el motivo por el
+ * que no se creó la esfera (ternas/cuaternas y uniones descartadas).
  *
  * Props:
  *   - masts:            List<MastilResponse>  – mástiles ya persistidos
@@ -64,16 +115,29 @@ export const MastilPositioner = ({
       onUpdateMastHeight(selectedMast.id, editHeight);
     }
   };
-  const MOTIVO_LABEL = {
-    sin_esfera_radio_insuficiente: 'mástiles muy separados para este radio',
-    sin_esfera_puntas_colineales: 'mástiles alineados',
-    sin_esfera_no_apoyable: 'diferencia de alturas excesiva',
-  };
+
   const zonas = coverageData?.zonas_desprotegidas || [];
   const ternas = coverageData?.triangulos_sin_esfera || [];
+  const uniones = coverageData?.uniones_descartadas || [];
   const areaLibre = zonas.reduce((s, z) => s + (z.area_m2 || 0), 0);
   const idxMast = (id) => masts.findIndex((m) => String(m.id) === String(id));
 
+  // ── Piezas sin esfera agrupadas por motivo (una columna por motivo) ──
+  const columnasPiezas = useMemo(() => {
+    const porMotivo = new Map();
+    const agregar = (pieza) => {
+      const motivo = pieza.motivo || 'otros';
+      if (!porMotivo.has(motivo)) porMotivo.set(motivo, []);
+      porMotivo.get(motivo).push(pieza);
+    };
+    (coverageData?.triangulos_sin_esfera || []).forEach(agregar);
+    (coverageData?.uniones_descartadas || []).forEach(agregar);
+    return [...porMotivo.entries()]
+      .map(([motivo, piezas]) => ({ motivo, piezas }))
+      .sort((a, b) => b.piezas.length - a.piezas.length);
+  }, [coverageData]);
+
+  const totalPiezas = ternas.length + uniones.length;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full items-start">
@@ -275,23 +339,49 @@ export const MastilPositioner = ({
               <span className="font-bold text-amber-600">{zonas.length} · {areaLibre.toFixed(1)} m²</span>
             </div>
 
-            {ternas.length > 0 && (
-              <div className="pt-2 border-t border-gray-200 space-y-1.5">
-                <div className="font-bold text-amber-700 uppercase">Ternas sin esfera posible ({ternas.length})</div>
-                {ternas.map((t) => (
-                  <div key={t.id} className="flex items-center gap-1.5 flex-wrap">
-                    {t.mastiles_ids.map((id) => {
-                      const i = idxMast(id);
-                      return i >= 0 ? (
-                        <button key={id} type="button" onClick={() => onSelectMast?.(masts[i])}
-                          className="px-1.5 py-0.5 rounded border border-amber-400 text-amber-700 hover:bg-amber-50 font-semibold">
-                          M-{i + 1}
-                        </button>
-                      ) : null;
-                    })}
-                    <span className="text-gray-500">{MOTIVO_LABEL[t.motivo] || t.motivo}</span>
-                  </div>
-                ))}
+            {totalPiezas > 0 && (
+              <div className="pt-2 border-t border-gray-200 space-y-2">
+                <div className="font-bold text-amber-700 uppercase">
+                  Ternas sin esfera posible ({totalPiezas})
+                  <span className="ml-2 normal-case font-normal text-[10px] text-gray-400">
+                    agrupadas por motivo
+                  </span>
+                </div>
+
+                <div
+                  className="grid gap-2 overflow-x-auto"
+                  style={{ gridTemplateColumns: `repeat(${columnasPiezas.length}, minmax(170px, 1fr))` }}
+                >
+                  {columnasPiezas.map(({ motivo, piezas }) => {
+                    const info = motivoInfo(motivo);
+                    return (
+                      <div key={motivo} className="flex flex-col min-w-0 border border-gray-200 rounded overflow-hidden bg-white">
+                        <div className={`px-2 py-1.5 border-b text-[11px] font-bold shrink-0 ${info.head}`}>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="truncate">{info.corto}</span>
+                            <span className="tabular-nums">{piezas.length}</span>
+                          </div>
+                          <div className="font-normal text-[10px] opacity-80 leading-tight">{info.label}</div>
+                        </div>
+                        <div className="space-y-1.5 overflow-y-auto max-h-64 p-1.5 custom-scrollbar">
+                          {piezas.map((t) => (
+                            <div key={t.id} className="flex items-center gap-1 flex-wrap">
+                              {(t.mastiles_ids || []).map((id) => {
+                                const i = idxMast(id);
+                                return i >= 0 ? (
+                                  <button key={id} type="button" onClick={() => onSelectMast?.(masts[i])}
+                                    className="px-1.5 py-0.5 rounded border border-amber-400 text-amber-700 hover:bg-amber-50 font-semibold">
+                                    M-{i + 1}
+                                  </button>
+                                ) : null;
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

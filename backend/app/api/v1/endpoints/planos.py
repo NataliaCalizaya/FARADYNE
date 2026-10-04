@@ -220,7 +220,6 @@ def get_modelo2d_edicion(
         resultado["lineas"] = modelo.get("lineas") or []
     return resultado
 
-
 @modelos2d_router.patch("/{id}")
 def update_modelo2d_endpoint(
     id: int,
@@ -229,7 +228,6 @@ def update_modelo2d_endpoint(
 ) -> Dict[str, Any]:
     """Actualización general del Modelo2D (compatibilidad)."""
     updated = PlanoRepository.update_modelo2d(
-        db,
         id_modelo2d=id,
         poligonos=payload.get("poligonos"),
         lineas=payload.get("lineas"),

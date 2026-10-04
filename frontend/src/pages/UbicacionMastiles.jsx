@@ -1,9 +1,11 @@
-   import React, { useState, useEffect, useCallback, useRef } from 'react';
-   import { Info, MapPin, Box, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Info, MapPin, Box, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 import { GeometriaViewerMastiles } from '../components/GeometriaViewerMastiles/GeometriaViewerMastiles';
 import { MastilPositioner } from '../components/MastilPositioner/MastilPositioner';
 import { Modelo3DViewer } from '../components/Modelo3DViewer/Modelo3DViewer';
+import { RecomendacionesMastiles } from '../components/GeometriaViewerMastiles/RecomendacionesMastiles';
+import { ResumenUbicacion } from '../components/GeometriaViewerMastiles/ResumenUbicacion';
 import { planosApi } from '../api/planos';
 import { mastilesApi } from '../api/mastiles';
 import { modelos3dApi } from '../api/modelos3d';
@@ -417,33 +419,21 @@ export const UbicacionMastiles = ({
         </div>
       )}
 
-      {/* ── Métricas de resumen ── */}
-      <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="grid grid-cols-3 gap-6 text-xs flex-1">
-          <div>
-            <div className="text-gray-500 font-medium">Radio Esfera Rodante (R)</div>
-            <div className="text-xl font-bold text-brand-blue font-condensed">
-              {coverageData?.radio_esfera_rodante_r ?? 30} m
-            </div>
-          </div>
-          <div>
-            <div className="text-gray-500 font-medium">Mástiles Instalados</div>
-            <div className="text-xl font-bold text-gray-800 font-condensed">
-              {masts.length}
-            </div>
-          </div>
-          <div>
-            <div className="text-gray-500 font-medium">Cobertura SPDA</div>
-            <div className="text-xl font-bold text-emerald-600 font-condensed">
-              {coverageData?.porcentaje_cobertura != null
-                ? `${coverageData.porcentaje_cobertura}%`
-                : masts.length > 0 ? '—' : '0%'}
-            </div>
-            {(coverageData?.advertencias || []).map((a, i) => (
-              <p key={i} className="text-[11px] text-amber-700 border-t border-gray-200 pt-2">{a}</p>
-            ))}
-          </div>
-        </div>
+      <ResumenUbicacion
+        radio={coverageData?.radio_esfera_rodante_r ?? 30}
+        totalMastiles={masts.length}
+        porcentajeCobertura={coverageData?.porcentaje_cobertura ?? null}
+        advertencias={coverageData?.advertencias || []}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        onRefresh={loadCoverage}
+        refreshing={coverageLoading}
+      />
+
+      <RecomendacionesMastiles
+        radio={coverageData?.radio_esfera_rodante_r ?? 30}
+        altura={mastHeight}
+      />
 
         {/* Selector de vista */}
         <div className="bg-slate-100 p-1 rounded-md border border-slate-200 flex items-center gap-1 shrink-0">
@@ -469,7 +459,6 @@ export const UbicacionMastiles = ({
             Actualizar cobertura
           </button>
         </div>
-      </div>
 
       {/* ── Visores: ocupan el ancho completo para que no se compriman ── */}
       <div>
@@ -516,6 +505,8 @@ export const UbicacionMastiles = ({
                   onSelectMast={handleSelectMast}
                   selectedMastId={selectedMastId}
                   placing={placing}
+                  radioEsfera={coverageData?.radio_esfera_rodante_r ?? 30}
+                  alturaNuevoMastil={mastHeight}
                 />
               ) : (
                 <div className="py-10 text-center text-gray-400 text-xs">

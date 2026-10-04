@@ -16,15 +16,20 @@ from app.schemas.mastil_schema import MastilResponse
 
 class SuperficieEsfera(BaseModel):
     id: str
+    tipo: str = "parche"                      # "parche" | "union"
     mastiles_ids: List[str]
-    puntas: List[List[float]]
-    centro_esfera: List[float]
     radio: float
-    radio_circunscrito: float
-    altura_centro_sobre_plano: float
     forma: str
-    vertices: List[List[float]] = []   # [x, y, z]
-    triangulos: List[List[int]] = []   # índices a `vertices`
+    # Solo parches
+    puntas: List[List[float]] = []
+    centro_esfera: List[float] = []
+    radio_circunscrito: float = 0.0
+    altura_centro_sobre_plano: float = 0.0
+    # Solo uniones
+    arista: List[List[float]] = []
+    centros_esfera: List[List[float]] = []
+    vertices: List[List[float]] = []
+    triangulos: List[List[int]] = []
 
 
 class TernaSinEsfera(BaseModel):

@@ -4,20 +4,23 @@ import * as THREE from 'three';
  * Capa 3D de cobertura SPDA (esfera rodante por ternas de mástiles).
  *
  * Convención FARADYNE: el backend envía [x, y, z] con Z = altura.
- * Three.js usa Y como altura, y el visor dibuja (x, z, -y), igual que
- * addPrismToScene y los mástiles en Modelo3DViewer.
+ * Three.js usa Y como altura, y el visor dibuja (x, z, -y).
+ *
+ * Se dibuja la mitad inferior de cada esfera y las zonas desprotegidas.
+ * Las ternas sin esfera posible NO se dibujan.
  */
 
 const COLORS = {
-  superficie: 0x22d3ee, // casquetes de esfera
+  superficie: 0x009933, // hemisferio inferior
   malla: 0xa5f3fc,      // aristas de la malla
   zona: 0xef4444,       // zona desprotegida
   zonaBorde: 0xfca5a5,
-  terna: 0xf59e0b,      // terna sin esfera posible
 };
 
-const toV3 = (p, lift = 0) => new THREE.Vector3(p[0], p[2] + lift, -p[1]);
+// Orden de dibujo fijo: evita el parpadeo de colores al mover la cámara.
+const ORDER = { superficie: 10, zona: 11 };
 
+const toV3 = (p, lift = 0) => new THREE.Vector3(p[0], p[2] + lift, -p[1]);
 const toArr = (m) => (Array.isArray(m) ? m : [m]);
 
 function overlayMaterial(color, opacity) {
@@ -27,13 +30,14 @@ function overlayMaterial(color, opacity) {
     opacity,
     side: THREE.DoubleSide,
     depthWrite: false,
-    polygonOffset: true,       // evita z-fighting con la cubierta
+    polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
   });
 }
 
-function buildSuperficie(sup) {
+/** Geometría del hemisferio inferior: del backend, o local si no vino malla. */
+function geometriaHemisferio(sup) {
   if (!sup.vertices?.length || !sup.triangulos?.length) return null;
 
   const pos = new Float32Array(sup.vertices.length * 3);
@@ -42,38 +46,50 @@ function buildSuperficie(sup) {
     pos[3 * i + 1] = p[2];
     pos[3 * i + 2] = -p[1];
   });
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setIndex(sup.triangulos.flat());
   geo.computeVertexNormals();
+  return geo;
+}
+
+function buildSuperficie(sup) {
+  const geo = geometriaHemisferio(sup);
+  if (!geo) return null;
+
+  // Asegura normales suaves para que la esfera se vea continua.
+  geo.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    color: COLORS.superficie,
+    transparent: true,
+    opacity: 0.30,
+
+    // Importante: sin wireframe
+    wireframe: false,
+
+    // Superficie visible desde ambos lados
+    side: THREE.DoubleSide,
+
+    // Transparencia
+    depthWrite: false,
+
+    roughness: 0.4,
+    metalness: 0.0,
+  });
+
+  const mesh = new THREE.Mesh(geo, material);
+
+  mesh.name = `superficie_${sup.id}`;
+  mesh.renderOrder = ORDER.superficie;
 
   const g = new THREE.Group();
   g.name = `superficie_${sup.id}`;
-  g.add(
-    new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({
-        color: COLORS.superficie,
-        transparent: true,
-        opacity: 0.35,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        roughness: 0.4,
-        flatShading: false,
-      })
-    )
-  );
-  g.add(
-    new THREE.LineSegments(
-      new THREE.WireframeGeometry(geo),
-      new THREE.LineBasicMaterial({ color: COLORS.malla, transparent: true, opacity: 0.8 })
-    )
-  );
+  g.add(mesh);
+
   return g;
 }
-
-function buildZona(zona, lift = 0.03) {
+function buildZona(zona, lift = 0.08) {
   const contorno = zona.poligono || [];
   const huecos = zona.huecos || [];
   if (contorno.length < 3) return null;
@@ -87,7 +103,7 @@ function buildZona(zona, lift = 0.03) {
   const pos = new Float32Array(puntos.length * 3);
   puntos.forEach((p, i) => {
     pos[3 * i] = p[0];
-    pos[3 * i + 1] = p[2] + lift;
+    pos[3 * i + 1] = (p[2] ?? 0) + lift;
     pos[3 * i + 2] = -p[1];
   });
 
@@ -97,36 +113,21 @@ function buildZona(zona, lift = 0.03) {
 
   const g = new THREE.Group();
   g.name = `zona_${zona.id}`;
-  g.add(new THREE.Mesh(geo, overlayMaterial(COLORS.zona, 0.55)));
-  g.add(
-    new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(contorno.map((p) => toV3(p, lift))),
-      new THREE.LineBasicMaterial({ color: COLORS.zonaBorde })
-    )
+
+  const mesh = new THREE.Mesh(geo, overlayMaterial(COLORS.zona, 0.55));
+  mesh.renderOrder = ORDER.zona;
+  g.add(mesh);
+
+  const borde = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints(contorno.map((p) => toV3(p, lift))),
+    new THREE.LineBasicMaterial({ color: COLORS.zonaBorde, depthWrite: false })
   );
+  borde.renderOrder = ORDER.zona + 0.1;
+  g.add(borde);
   return g;
 }
 
-function buildTerna(terna) {
-  if ((terna.puntas || []).length !== 3) return null;
-  const pts = terna.puntas.map((p) => toV3(p, 0.02));
-
-  const geo = new THREE.BufferGeometry().setFromPoints(pts);
-  geo.setIndex([0, 1, 2]);
-
-  const g = new THREE.Group();
-  g.name = `terna_sin_esfera_${terna.id}`;
-  g.add(new THREE.Mesh(geo, overlayMaterial(COLORS.terna, 0.3)));
-  g.add(
-    new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: COLORS.terna })
-    )
-  );
-  return g;
-}
-
-/** Construye el grupo three con toda la cobertura (respuesta de /cobertura/proyecto/{id}). */
+/** Construye el grupo three con la cobertura (respuesta de /cobertura/proyecto/{id}). */
 export function buildCoberturaGroup(coverage, { superficies = true, zonas = true } = {}) {
   const root = new THREE.Group();
   root.name = 'cobertura_spda';
@@ -143,10 +144,7 @@ export function buildCoberturaGroup(coverage, { superficies = true, zonas = true
       const g = buildZona(z);
       if (g) root.add(g);
     });
-    (coverage.triangulos_sin_esfera || []).forEach((t) => {
-      const g = buildTerna(t);
-      if (g) root.add(g);
-    });
+    // triangulos_sin_esfera: a propósito no se dibujan.
   }
   return root;
 }

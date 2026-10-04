@@ -38,6 +38,7 @@ import {
   Minimize,
   MousePointer2,
   Pencil,
+  CirclePlus,
   Scan,
   ArrowRight,
 } from 'lucide-react';
@@ -59,6 +60,8 @@ const COLORS = {
   sideSelected: '#f59e0b',
   sideLinked: '#16a34a',
   draft: '#2a9d5c',
+  measure: '#0f766e',
+  measureLeg: '#64748b',
 };
 
 const MIN_ZOOM = 0.2;
@@ -66,6 +69,12 @@ const MAX_ZOOM = 60;
 const FIT_MARGIN = 24;
 const MIN_STAGE_HEIGHT = 560;
 const DEFAULT_BOX = { min_x: 0, min_y: 0, max_x: 20, max_y: 15 };
+
+// Radio (px de pantalla) dentro del cual la medición se ajusta a un vértice.
+const MEASURE_SNAP_PX = 12;
+
+// Tramos más cortos que esto (m) no se dibujan en la medición.
+const MIN_MEASURE_LEG = 0.005;
 
 
 // ==========================================================
@@ -91,6 +100,24 @@ const normalizePoints = (points) =>
     const [x, y] = getPointCoords(p);
     return { x, y };
   });
+
+// Longitud de un lado (a → b), en metros.
+const sideLength = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+
+// Área del polígono (fórmula de Gauss / shoelace), en m².
+const polygonArea = (pts) => {
+  let sum = 0;
+
+  pts.forEach((a, i) => {
+    const b = pts[(i + 1) % pts.length];
+    sum += a.x * b.y - b.x * a.y;
+  });
+
+  return Math.abs(sum) / 2;
+};
+
+const formatMeters = (v) => `${v.toFixed(2)} m`;
+const formatArea = (v) => `${v.toFixed(2)} m²`;
 
 // Punto de la recta a-b más cercano a (px, py), limitado al segmento.
 const closestOnSegment = (px, py, ax, ay, bx, by) => {
@@ -338,6 +365,39 @@ const StatChip = ({ children, tone = 'neutral', title }) => {
   );
 };
 
+// Etiqueta de las cotas de medición, centrada en (x, y) de pantalla.
+const MeasureLabel = ({ x, y, text, color = COLORS.measure, bold = false }) => {
+  const w = text.length * 5.6 + 10;
+
+  return (
+    <Group x={x} y={y} listening={false}>
+      <Rect
+        x={-w / 2}
+        y={-8}
+        width={w}
+        height={16}
+        fill="#fff"
+        stroke={color}
+        strokeWidth={1}
+        cornerRadius={3}
+        opacity={0.95}
+      />
+      <Text
+        text={text}
+        x={-w / 2}
+        y={-8}
+        width={w}
+        height={16}
+        align="center"
+        verticalAlign="middle"
+        fontSize={10}
+        fontStyle={bold ? 'bold' : 'normal'}
+        fill={color}
+      />
+    </Group>
+  );
+};
+
 
 // ==========================================================
 // COMPONENTE
@@ -412,12 +472,17 @@ export const GeometriaViewer = ({
     rectangle  → creando rectángulo (2 clics)
     level      → colocando un nivel (1 clic)
     vertex     → agregando vértices a la superficie seleccionada
+    measure    → midiendo una distancia (2 clics, temporal)
   */
   const [mode, setMode] = useState(null);
 
   const [draft, setDraft] = useState(null);
   const draftRef = useRef(null);
   const pendingLevelRef = useRef(null);
+
+  // Medición temporal: hasta 2 puntos del plano [x, y] y el punto bajo el cursor.
+  // No se guarda en el modelo; se descarta al salir de la herramienta.
+  const [measure, setMeasure] = useState({ points: [], hover: null });
 
   // Diálogo para escribir el valor de un nivel (reemplaza a window.prompt).
   const [levelDialog, setLevelDialog] = useState(null);
@@ -687,6 +752,40 @@ export const GeometriaViewer = ({
 
 
   // ========================================================
+  // MEDICIÓN TEMPORAL
+  // ========================================================
+
+  // Imán a los vértices de las superficies (MEASURE_SNAP_PX en pantalla).
+  const snapMeasurePoint = (x, y) => {
+    const maxDist = MEASURE_SNAP_PX / T.scale;
+    let best = null;
+
+    poligonos.forEach((p) =>
+      normalizePoints(p.puntos).forEach((pt) => {
+        const d = Math.hypot(pt.x - x, pt.y - y);
+
+        if (d <= maxDist && (!best || d < best.d)) {
+          best = { x: pt.x, y: pt.y, d };
+        }
+      })
+    );
+
+    return best ? [best.x, best.y] : [x, y];
+  };
+
+  const addMeasurePoint = (x, y) => {
+    const point = snapMeasurePoint(x, y);
+
+    setMeasure((prev) =>
+      // Con la medición completa, el siguiente clic empieza otra.
+      prev.points.length >= 2
+        ? { points: [point], hover: null }
+        : { points: [...prev.points, point], hover: null }
+    );
+  };
+
+
+  // ========================================================
   // ZOOM Y PAN
   // ========================================================
 
@@ -723,6 +822,19 @@ export const GeometriaViewer = ({
   };
 
   const handlePointerMove = (e) => {
+    // Medición "elástica": el segundo punto sigue al cursor.
+    if (mode === 'measure') {
+      const p = pointerToPlan(e.target.getStage());
+
+      if (p) {
+        setMeasure((prev) =>
+          prev.points.length === 1
+            ? { ...prev, hover: snapMeasurePoint(p[0], p[1]) }
+            : prev
+        );
+      }
+    }
+
     if (!isDraggingPan.current) {
       return;
     }
@@ -787,6 +899,23 @@ export const GeometriaViewer = ({
     setDraft(null);
 
     pendingLevelRef.current = null;
+
+    setMeasure({ points: [], hover: null });
+  };
+
+  const toggleMeasureTool = () => {
+    if (mode === 'measure') {
+      cancelMode();
+      return;
+    }
+
+    cancelMode();
+    clearSelection();
+
+    setError(null);
+    setInfo(null);
+
+    setMode('measure');
   };
 
   const getSurfaceLayer = () => {
@@ -826,6 +955,7 @@ export const GeometriaViewer = ({
     setInfo(null);
 
     clearSelection();
+    setMeasure({ points: [], hover: null });
 
     draftRef.current = { kind, points: [] };
     setDraft({ kind, points: [] });
@@ -1264,6 +1394,16 @@ export const GeometriaViewer = ({
       return;
     }
 
+    if (mode === 'measure') {
+      const p = pointerToPlan(stage);
+
+      if (p) {
+        addMeasurePoint(p[0], p[1]);
+      }
+
+      return;
+    }
+
     if (e.target === stage) {
       clearSelection();
     }
@@ -1429,6 +1569,7 @@ export const GeometriaViewer = ({
     triangle: () => toggleSurfaceTool('triangle'),
     rectangle: () => toggleSurfaceTool('rectangle'),
     level: openCreateLevel,
+    measure: toggleMeasureTool,
     fit: resetView,
   };
 
@@ -1461,6 +1602,7 @@ export const GeometriaViewer = ({
         case 't': a.triangle(); break;
         case 'r': a.rectangle(); break;
         case 'n': a.level(); break;
+        case 'm': a.measure(); break;
         case 'f': a.fit(); break;
         default: break;
       }
@@ -1513,6 +1655,17 @@ export const GeometriaViewer = ({
       });
     });
   }
+
+  // Medidas de la superficie seleccionada (se recalculan en vivo al
+  // arrastrar, agregar o quitar vértices).
+  const selectedPts = selectedPoly ? normalizePoints(selectedPoly.puntos) : [];
+
+  const sideLengths = selectedPts.map((a, i) =>
+    sideLength(a, selectedPts[(i + 1) % selectedPts.length])
+  );
+
+  const selectedArea = polygonArea(selectedPts);
+  const selectedPerimeter = sideLengths.reduce((s, v) => s + v, 0);
 
   // La superficie seleccionada se dibuja al final (queda arriba).
   const orderedPolys = selectedPoly
@@ -1624,6 +1777,14 @@ export const GeometriaViewer = ({
             </>
           )}
 
+          {mode === 'measure' && (
+            <>
+              <strong>Medir:</strong> haga clic en el punto de origen y luego en
+              el destino. Se ajusta a los vértices cercanos. Un clic más inicia
+              otra medición; la medición es temporal y no se guarda.
+            </>
+          )}
+
           {!mode && (
             <>
               Seleccione una superficie o un nivel con un clic. Arrastre un
@@ -1654,7 +1815,7 @@ export const GeometriaViewer = ({
             onClick={cancelMode}
             className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-white border border-blue-200 text-blue-800 hover:bg-blue-100 flex items-center gap-1 transition"
           >
-            {mode === 'vertex' ? (
+            {mode === 'vertex' || mode === 'measure' ? (
               <>
                 <CheckCircle2 className="w-3.5 h-3.5" /> Listo
               </>
@@ -1724,12 +1885,20 @@ export const GeometriaViewer = ({
           />
 
           <ToolButton
-            icon={Ruler}
+            icon={CirclePlus}
             label="Agregar nivel"
             shortcut="N"
             active={mode === 'level' || levelDialog?.kind === 'create'}
             disabled={toolsLocked || !idModelo2D}
             onClick={() => (mode === 'level' ? cancelMode() : openCreateLevel())}
+          />
+
+          <ToolButton
+            icon={Ruler}
+            label="Medir distancia"
+            shortcut="M"
+            active={mode === 'measure'}
+            onClick={toggleMeasureTool}
           />
 
         </div>
@@ -1786,6 +1955,7 @@ export const GeometriaViewer = ({
                       {selectedPoly.tipo ? ` · ${selectedPoly.tipo}` : ''}
                       {' · '}
                       {(selectedPoly.puntos || []).length} vértices
+                      {` · ${formatArea(selectedArea)}`}
                     </div>
                   </div>
 
@@ -1813,39 +1983,67 @@ export const GeometriaViewer = ({
                   {pendienteText(selectedPoly)}
                 </div>
 
-                {/* Selector de lado */}
-                <div>
-                  <div className="text-[11px] text-gray-500 mb-1.5">
-                    Lado elegido
+                {/* Área y perímetro */}
+                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                  <div className="rounded-md bg-gray-50 px-2.5 py-1.5">
+                    <div className="text-gray-500">Área</div>
+                    <div className="font-semibold text-gray-800 tabular-nums">
+                      {formatArea(selectedArea)}
+                    </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-1">
-                    {(selectedPoly.puntos || []).map((_, i) => {
+                  <div className="rounded-md bg-gray-50 px-2.5 py-1.5">
+                    <div className="text-gray-500">Perímetro</div>
+                    <div className="font-semibold text-gray-800 tabular-nums">
+                      {formatMeters(selectedPerimeter)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lados: longitud + nivel asociado. Clic para elegir el lado. */}
+                <div>
+                  <div className="text-[11px] text-gray-500 mb-1.5">
+                    Lados · clic para elegir
+                  </div>
+
+                  <ul className="max-h-40 overflow-y-auto space-y-1 pr-0.5">
+                    {selectedPts.map((_, i) => {
                       const chosen = selectedSide === i;
                       const linked = linkedSides.has(i);
 
                       return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setSelectedSide(chosen ? null : i)}
-                          title={
-                            linked
-                              ? `Nivel: ${linkedSides.get(i).join(' / ')}`
-                              : `Lado ${i}`
-                          }
-                          className={`min-w-[30px] px-1.5 py-1 rounded-md text-[11px] font-medium border transition ${chosen
-                              ? 'bg-amber-500 border-amber-500 text-white'
-                              : linked
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
-                                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                            }`}
-                        >
-                          L{i}
-                        </button>
+                        <li key={i}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSide(chosen ? null : i)}
+                            title={
+                              linked
+                                ? `Nivel: ${linkedSides.get(i).join(' / ')}`
+                                : `Lado ${i}`
+                            }
+                            className={`w-full flex items-center gap-2 px-2 py-1 rounded-md border text-[11px] transition ${chosen
+                                ? 'bg-amber-500 border-amber-500 text-white'
+                                : linked
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                                  : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                              }`}
+                          >
+                            <span className="font-semibold w-6 text-left">L{i}</span>
+                            <span className="tabular-nums flex-1 text-left">
+                              {formatMeters(sideLengths[i])}
+                            </span>
+                            {linked && (
+                              <span
+                                className={`font-medium truncate ${chosen ? 'text-white' : 'text-emerald-700'}`}
+                              >
+                                {linkedSides.get(i).join(' / ')}
+                              </span>
+                            )}
+                          </button>
+                        </li>
                       );
                     })}
-                  </div>
+                  </ul>
                 </div>
 
                 {(selectedPoly.niveles || []).length > 0 && (
@@ -1910,7 +2108,7 @@ export const GeometriaViewer = ({
                 <header className="flex items-start justify-between gap-2">
                   <div>
                     <div className="text-[13px] font-semibold text-gray-800 flex items-center gap-1.5">
-                      <Ruler className="w-3.5 h-3.5 text-amber-600" />
+                      <CirclePlus className="w-3.5 h-3.5 text-amber-600" />
                       Nivel {selectedLevel.texto ?? selectedLevel.valor}
                     </div>
                     <div className="text-[11px] text-gray-500">
@@ -2197,9 +2395,11 @@ export const GeometriaViewer = ({
                           const linked = linkedSides.has(i);
                           const chosen = selectedSide === i;
 
+                          const len = formatMeters(sideLength(a, b));
+
                           const label = linked
-                            ? `L${i} · ${linkedSides.get(i).join(' / ')}`
-                            : `L${i}`;
+                            ? `L${i} · ${len} · ${linkedSides.get(i).join(' / ')}`
+                            : `L${i} · ${len}`;
 
                           const w = Math.max(24, label.length * 5.6 + 10);
 
@@ -2479,6 +2679,99 @@ export const GeometriaViewer = ({
                   );
                 })}
 
+
+                {/* ---- MEDICIÓN TEMPORAL ---- */}
+
+                {measure.points.length > 0 && (() => {
+                  const A = measure.points[0];
+                  const B = measure.points[1] ?? measure.hover;
+
+                  const [sax, say] = transformPoint(A[0], A[1]);
+
+                  // Solo el primer punto: todavía no hay segmento.
+                  if (!B) {
+                    return (
+                      <Circle
+                        x={sax}
+                        y={say}
+                        radius={5}
+                        fill={COLORS.measure}
+                        stroke="#fff"
+                        strokeWidth={1.5}
+                        listening={false}
+                      />
+                    );
+                  }
+
+                  const [sbx, sby] = transformPoint(B[0], B[1]);
+                  const [scx, scy] = transformPoint(A[0], B[1]); // esquina del triángulo
+
+                  const dist = Math.hypot(B[0] - A[0], B[1] - A[1]);
+
+                  // El eje y del plano es el horizontal en pantalla.
+                  const horizontal = Math.abs(B[1] - A[1]);
+                  const vertical = Math.abs(B[0] - A[0]);
+                  const hasLegs =
+                    horizontal > MIN_MEASURE_LEG && vertical > MIN_MEASURE_LEG;
+
+                  return (
+                    <Group listening={false}>
+
+                      {hasLegs && (
+                        <Line
+                          points={[sax, say, scx, scy, sbx, sby]}
+                          stroke={COLORS.measureLeg}
+                          strokeWidth={1}
+                          dash={[4, 3]}
+                        />
+                      )}
+
+                      <Line
+                        points={[sax, say, sbx, sby]}
+                        stroke={COLORS.measure}
+                        strokeWidth={2}
+                      />
+
+                      {[[sax, say], [sbx, sby]].map(([px, py], i) => (
+                        <Circle
+                          key={`measure-end-${i}`}
+                          x={px}
+                          y={py}
+                          radius={5}
+                          fill={COLORS.measure}
+                          stroke="#fff"
+                          strokeWidth={1.5}
+                        />
+                      ))}
+
+                      {hasLegs && (
+                        <>
+                          <MeasureLabel
+                            x={(sax + scx) / 2}
+                            y={(say + scy) / 2 + (sby > say ? -13 : 13)}
+                            text={formatMeters(horizontal)}
+                            color={COLORS.measureLeg}
+                          />
+                          <MeasureLabel
+                            x={(scx + sbx) / 2 + (sax < sbx ? 30 : -30)}
+                            y={(scy + sby) / 2}
+                            text={formatMeters(vertical)}
+                            color={COLORS.measureLeg}
+                          />
+                        </>
+                      )}
+
+                      <MeasureLabel
+                        x={(sax + sbx) / 2}
+                        y={(say + sby) / 2}
+                        text={formatMeters(dist)}
+                        bold
+                      />
+
+                    </Group>
+                  );
+                })()}
+
               </Layer>
 
             </Stage>
@@ -2574,7 +2867,7 @@ export const GeometriaViewer = ({
           >
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                <Ruler className="w-5 h-5" />
+                <CirclePlus className="w-5 h-5" />
               </div>
 
               <div>

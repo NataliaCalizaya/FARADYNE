@@ -1,50 +1,9 @@
-/**
- * GeometriaViewerMastiles
- *
- * Componente especializado para la página UbicacionMastiles (HU05).
- * Visualiza la geometría 2D validada (read-only, no se puede editar el
- * plano desde acá) y captura clics sobre el canvas para colocar mástiles
- * captores, además de permitir arrastrarlos para moverlos y seleccionarlos
- * para cambiar su altura o eliminarlos desde el panel lateral.
- *
- * IMPORTANTE:
- *  - No modifica GeometriaViewer ni su lógica de edición.
- *  - Usa EXACTAMENTE la misma transformación de coordenadas
- *    (transformPoint / inverseTransformPoint) que GeometriaViewer, para que
- *    un mástil colocado acá caiga en el mismo punto real del edificio que
- *    ve el editor 2D y que usa el generador de Modelo 3D. (La versión
- *    anterior de este archivo tenía los dos ejes invertidos y mostraba
- *    la geometría rotada 180° respecto al resto del sistema.)
- *  - Trae el plano de fondo (líneas reconocidas del PDF/DXF) pidiendo
- *    `getModelo2DEdicion(idModelo2D, { incluirLineas: true })`: el
- *    endpoint de edición normalmente NO trae las líneas (son pesadas y el
- *    editor las pide en cada operación), así que hay que pedirlas
- *    explícitamente acá. Ver la nota al pie de este archivo sobre el
- *    cambio que esto requiere en planos.py / planos.js.
- *  - Los mástiles se persisten en el backend a través de UbicacionMastiles;
- *    este componente solo dibuja los marcadores y notifica al padre
- *    (colocar, mover, seleccionar). Eliminar y cambiar altura se piden
- *    desde MastilPositioner, pero mover (arrastrar) se resuelve acá mismo.
- *
- * Props:
- *   idModelo2D     {string}   UUID del Modelo 2D validado.
- *   masts          {Array}    Mástiles ya persistidos:
- *                             { id, posicion_x, posicion_y, altura, tipo }
- *   onMastClick    {Function} (x, y) → clic en modo colocación (placing=true).
- *   onMastMove     {Function} (id, x, y) → se soltó un mástil arrastrado.
- *   onSelectMast   {Function} (mast|null) → clic sobre un mástil ya
- *                             colocado (fuera de modo colocación); pasa
- *                             null cuando se hace clic en el vacío.
- *   selectedMastId {string}   id del mástil actualmente seleccionado
- *                             (resalta su marcador).
- *   placing        {boolean}  true mientras se espera un clic para colocar.
- *   className      {string}   Clases CSS opcionales para el contenedor.
- */
-import React, {useCallback, useEffect, useRef, useState,
+import React, {
+  useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 
 import {
-  Stage, Layer, Line, Circle, Rect, Text, Group,
+  Stage, Layer, Line, Circle, Rect, Text, Group, Shape,
 } from 'react-konva';
 
 import {
@@ -53,7 +12,12 @@ import {
 
 import { planosApi } from '../../api/planos';
 import { getMastColor } from '../../hooks/utilsMastilVisual';
-
+import {
+   GRID_STEPS, DEFAULT_GRID_INDEX,
+   fitTransform, snapPoint, gridStride, gridLineValues,
+   construirCotas, separacionMaxima,
+ } from '../../hooks/utilsGrillaMastiles';
+import { CotasTemporales } from './CotasTemporales';
 
 // ============================================================
 // CONSTANTES
@@ -64,6 +28,9 @@ const COLORS = {
   levelLinked: '#1a6dba',
   levelFree: '#d97706',
   mastSelected: '#d946ef',
+  gridMinor: '#cbd5e1',
+  gridMajor: '#94a3b8',
+  snapNode: '#f59e0b',
 };
 
 
@@ -135,6 +102,8 @@ export const GeometriaViewerMastiles = ({
   onSelectMast = null,
   selectedMastId = null,
   placing = false,
+  radioEsfera = 30,
+ alturaNuevoMastil = null,
   className = '',
 }) => {
 
@@ -150,6 +119,21 @@ export const GeometriaViewerMastiles = ({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [stageDimensions, setStageDimensions] = useState({ width: 900, height: 480 });
+
+  // ── Grilla e imán ────────────────────────────────────────
+  const [showGrid, setShowGrid] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [gridIndex, setGridIndex] = useState(DEFAULT_GRID_INDEX);
+  const [hoverNode, setHoverNode] = useState(null); // nodo bajo el cursor al colocar
+  const [dragPoint, setDragPoint] = useState(null); // { id, x, y } mientras se arrastra un mástil
+  const gridStep = GRID_STEPS[gridIndex];
+
+  // La grilla nace en la esquina mínima del modelo: los nodos quedan alineados
+  // con el edificio y es fácil ubicar mástiles en filas y columnas simétricas.
+  const gridOrigin = useMemo(
+    () => ({ x: boundingBox?.min_x ?? 0, y: boundingBox?.min_y ?? 0 }),
+    [boundingBox]
+  );
 
   const containerRef = useRef(null);
   const isDraggingPan = useRef(false);
@@ -225,33 +209,14 @@ export const GeometriaViewerMastiles = ({
 
   // ── Transformación plano ↔ pantalla ─────────────────────
   //
-  // EXACTAMENTE la misma fórmula que usa GeometriaViewer.jsx (sin
-  // invertir ejes) para que un mástil colocado acá quede en el mismo
-  // punto real del edificio en todas las vistas (editor 2D y Modelo 3D).
+  // Mismo mapeo que GeometriaViewer.jsx (pantalla X = y del plano, pantalla
+  // Y = x del plano) para que un mástil colocado acá quede en el mismo punto
+  // real del edificio en todas las vistas (editor 2D y Modelo 3D).
+  //
+  // El encuadre (escala y desplazamiento) tiene en cuenta ese intercambio de
+  // ejes, así el modelo queda centrado y entero dentro del visor.
 
-  const getTransform = () => {
-    const margin = 30;
-    const cw = stageDimensions.width - margin * 2;
-    const ch = stageDimensions.height - margin * 2;
-
-    if (!boundingBox || boundingBox.min_x === undefined) {
-      return { scale: zoom, offsetX: margin + pan.x, offsetY: margin + pan.y };
-    }
-
-    const bboxWidth = Math.max(boundingBox.max_x - boundingBox.min_x, 1);
-    const bboxHeight = Math.max(boundingBox.max_y - boundingBox.min_y, 1);
-    const baseScale = Math.min(cw / bboxWidth, ch / bboxHeight);
-    const scale = baseScale * zoom;
-
-    const offsetX =
-      margin + (cw - bboxWidth * scale) / 2 - boundingBox.min_x * scale + pan.x;
-    const offsetY =
-      margin + (ch - bboxHeight * scale) / 2 - boundingBox.min_y * scale + pan.y;
-
-    return { scale, offsetX, offsetY };
-  };
-
-  const T = getTransform();
+  const T = fitTransform(boundingBox, stageDimensions.width, stageDimensions.height, zoom, pan);
 
   const transformPoint = (x, y) => [
     y * T.scale + T.offsetX,
@@ -273,6 +238,11 @@ export const GeometriaViewerMastiles = ({
     return inverseTransformPoint(pos.x, pos.y);
   };
 
+  // Punto del plano -> nodo de grilla más cercano (si el imán está activo).
+  const snapIfEnabled = (x, y) => (
+    snapEnabled ? snapPoint(x, y, gridOrigin, gridStep) : [x, y]
+  );
+
 
   // ── Zoom y Pan ───────────────────────────────────────────
 
@@ -293,6 +263,19 @@ export const GeometriaViewerMastiles = ({
   };
 
   const handlePointerMove = (e) => {
+    // Al colocar con imán: marcar el nodo al que va a ir el mástil.
+   // if (placing && snapEnabled) {
+      if (placing) {
+        const p = pointerToPlan(e.target.getStage());
+        if (p) {
+          //const node = snapPoint(p[0], p[1], gridOrigin, gridStep);
+          const node = snapIfEnabled(p[0], p[1]);
+          setHoverNode((prev) => (
+            prev && prev[0] === node[0] && prev[1] === node[1] ? prev : node
+          ));
+        }
+    }
+
     if (!isDraggingPan.current) return;
 
     const dx = e.evt.clientX - lastPointerPos.current.x;
@@ -310,6 +293,11 @@ export const GeometriaViewerMastiles = ({
 
   const handlePointerUp = () => {
     isDraggingPan.current = false;
+  };
+
+  const handlePointerLeave = () => {
+    isDraggingPan.current = false;
+    setHoverNode(null);
   };
 
   const resetView = () => {
@@ -335,7 +323,10 @@ export const GeometriaViewerMastiles = ({
     if (placing) {
       if (!onMastClick) return;
       const p = pointerToPlan(e.target.getStage());
-      if (p) onMastClick(p[0], p[1]);
+      if (p) {
+        const [x, y] = snapIfEnabled(p[0], p[1]);
+        onMastClick(x, y);
+      }
       return;
     }
 
@@ -348,16 +339,75 @@ export const GeometriaViewerMastiles = ({
 
   // ── Mover un mástil existente (arrastre) ─────────────────
 
+  // Mientras se arrastra, el mástil salta de nodo en nodo.
+  const mastDragBound = (pos) => {
+    if (!snapEnabled) return pos;
+    const [px, py] = inverseTransformPoint(pos.x, pos.y);
+    const [nx, ny] = snapPoint(px, py, gridOrigin, gridStep);
+    const [sx, sy] = transformPoint(nx, ny);
+    return { x: sx, y: sy };
+  };
+
   const handleMastDragEnd = (mast, e) => {
     draggingMastRef.current = true;
+    setDragPoint(null);
 
-    const [x, y] = inverseTransformPoint(e.target.x(), e.target.y());
+    const [rawX, rawY] = inverseTransformPoint(e.target.x(), e.target.y());
+    const [x, y] = snapIfEnabled(rawX, rawY);
 
     if (onMastMove) {
       onMastMove(mast.id, x, y);
     }
   };
 
+  const handleMastDragMove = (mast, e) => {
+    const [x, y] = inverseTransformPoint(e.target.x(), e.target.y());
+    setDragPoint({ id: mast.id, x, y });
+  };
+
+  // ── Grilla (dibujada en un solo trazo por tipo de línea) ─
+
+  const { width: stageW, height: stageH } = stageDimensions;
+
+  let gridX = [];
+  let gridY = [];
+  if (showGrid) {
+    const stride = gridStride(gridStep, T.scale);
+    const [xA, yA] = inverseTransformPoint(0, 0);
+    const [xB, yB] = inverseTransformPoint(stageW, stageH);
+    gridX = gridLineValues(Math.min(xA, xB), Math.max(xA, xB), gridOrigin.x, gridStep, stride);
+    gridY = gridLineValues(Math.min(yA, yB), Math.max(yA, yB), gridOrigin.y, gridStep, stride);
+  }
+
+  // x constante -> línea horizontal en pantalla; y constante -> vertical.
+  const drawGrid = (major) => (ctx, shape) => {
+    ctx.beginPath();
+    gridX.forEach(({ value, major: isMajor }) => {
+      if (isMajor !== major) return;
+      const sy = value * T.scale + T.offsetY;
+      ctx.moveTo(0, sy);
+      ctx.lineTo(stageW, sy);
+    });
+    gridY.forEach(({ value, major: isMajor }) => {
+      if (isMajor !== major) return;
+      const sx = value * T.scale + T.offsetX;
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, stageH);
+    });
+    ctx.fillStrokeShape(shape);
+  };
+
+  // Cotas temporales: al colocar (desde el cursor) o al arrastrar un mástil.
+  const origenCotas = placing ? hoverNode : (dragPoint ? [dragPoint.x, dragPoint.y] : null);
+  const alturaRef = placing
+    ? alturaNuevoMastil
+    : masts.find((m) => String(m.id) === String(dragPoint?.id))?.altura;
+  const dMaxPar = alturaRef != null
+    ? separacionMaxima(radioEsfera, Number(alturaRef)).par
+    : null;
+  const cotas = origenCotas
+    ? construirCotas(origenCotas, masts, { excluirId: dragPoint?.id, dMax: dMaxPar })
+    : [];
 
   // ── Render ───────────────────────────────────────────────
 
@@ -384,16 +434,67 @@ export const GeometriaViewerMastiles = ({
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
 
-      {/* ── Mini toolbar: zoom + reset ── */}
-      <div className="flex items-center gap-1.5 justify-end">
+      {/* ── Mini toolbar: grilla + zoom + reset ── */}
+      <div className="flex flex-wrap items-center gap-1.5 justify-end">
 
         {/* Indicador de modo colocación */}
         {placing && (
           <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 border border-amber-400 rounded-full text-amber-800 text-[11px] font-semibold animate-pulse mr-auto">
             <MapPin className="w-3.5 h-3.5" />
             Haga clic en la geometría para colocar el mástil
+            {snapEnabled && hoverNode && (
+              <span className="font-normal tabular-nums">
+                {` · x ${hoverNode[0].toFixed(2)} m, y ${hoverNode[1].toFixed(2)} m`}
+              </span>
+            )}
           </div>
         )}
+
+        {/* Grilla: mostrar, imán y paso */}
+        <div className="flex items-center gap-3 px-2.5 py-1 bg-white border border-gray-300 rounded text-[11px] text-gray-600">
+          <label className="flex items-center gap-1 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showGrid}
+              onChange={(e) => setShowGrid(e.target.checked)}
+            />
+            Grilla
+          </label>
+
+          <label className="flex items-center gap-1 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={snapEnabled}
+              onChange={(e) => {
+                setSnapEnabled(e.target.checked);
+                if (!e.target.checked) setHoverNode(null);
+              }}
+            />
+            Imán
+          </label>
+
+          <div className="flex flex-col items-stretch">
+            <input
+              type="range"
+              min={0}
+              max={GRID_STEPS.length - 1}
+              step={1}
+              value={gridIndex}
+              onChange={(e) => setGridIndex(Number(e.target.value))}
+              className="w-28 accent-sky-500"
+              aria-label="Tamaño de la grilla"
+              aria-valuetext={`${gridStep} por ${gridStep} metros`}
+              title={`Grilla de ${gridStep} m × ${gridStep} m`}
+            />
+            <div className="flex justify-between text-[9px] text-gray-400 leading-none">
+              {GRID_STEPS.map((s) => (
+                <span key={s} className={s === gridStep ? 'text-gray-700 font-semibold' : ''}>
+                  {s} m
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
 
         <button
           type="button"
@@ -417,7 +518,7 @@ export const GeometriaViewerMastiles = ({
           type="button"
           onClick={resetView}
           className="p-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50"
-          title="Restablecer vista"
+          title="Restablecer vista (centra el modelo)"
         >
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
@@ -438,10 +539,29 @@ export const GeometriaViewerMastiles = ({
           onMouseDown={handlePointerDown}
           onMouseMove={handlePointerMove}
           onMouseUp={handlePointerUp}
+          onMouseLeave={handlePointerLeave}
           onClick={handleStageClick}
           style={{ cursor: placing ? 'crosshair' : 'grab' }}
         >
           <Layer>
+
+            {/* ── Grilla de ubicación (por debajo de todo) ── */}
+            {showGrid && (
+              <>
+                <Shape
+                  listening={false}
+                  stroke={COLORS.gridMinor}
+                  strokeWidth={0.6}
+                  sceneFunc={drawGrid(false)}
+                />
+                <Shape
+                  listening={false}
+                  stroke={COLORS.gridMajor}
+                  strokeWidth={1}
+                  sceneFunc={drawGrid(true)}
+                />
+              </>
+            )}
 
             {/* ── Líneas de fondo: el plano usado para reconocer la geometría ── */}
             {lineas.map((line, idx) => {
@@ -546,6 +666,8 @@ export const GeometriaViewerMastiles = ({
                   x={sx}
                   y={sy}
                   draggable={!placing}
+                  dragBoundFunc={mastDragBound}
+                  onDragMove={(e) => handleMastDragMove(mast, e)}
                   onClick={(e) => {
                     e.cancelBubble = true;
                     if (!placing && onSelectMast) onSelectMast(mast);
@@ -596,6 +718,23 @@ export const GeometriaViewerMastiles = ({
             })}
           </Layer>
 
+          {/* ── Nodo de imán bajo el cursor (no captura eventos) ── */}
+          <Layer listening={false}>
+            {placing && snapEnabled && hoverNode && (() => {
+              const [nx, ny] = transformPoint(hoverNode[0], hoverNode[1]);
+              return (
+                <Group x={nx} y={ny}>
+                  <Line points={[-9, 0, 9, 0]} stroke={COLORS.snapNode} strokeWidth={1.5} />
+                  <Line points={[0, -9, 0, 9]} stroke={COLORS.snapNode} strokeWidth={1.5} />
+                  <Circle radius={6} stroke={COLORS.snapNode} strokeWidth={2} />
+                </Group>
+              );
+            })()}
+            {cotas.length > 0 && (
+              <CotasTemporales cotas={cotas} transformPoint={transformPoint} />
+            )}
+          </Layer>
+
         </Stage>
       </div>
 
@@ -616,6 +755,7 @@ export const GeometriaViewerMastiles = ({
         <span className="ml-auto text-[10px] text-gray-400">
           Rueda: zoom · arrastrar fondo: pan · arrastrar mástil: mover
           {placing ? ' · clic: colocar mástil' : ' · clic en mástil: seleccionar'}
+          {showGrid && ` · grilla ${gridStep} × ${gridStep} m, las líneas más gruesas marcan cada 5 m`}
         </span>
       </div>
 
