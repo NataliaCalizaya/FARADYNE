@@ -222,7 +222,7 @@ export function Workspace({ onLogout }) {
             <ListadoMateriales onNext={() => setCurrentStep(6)} />
           )}
           {currentStep === 6 && (
-            <MemoriaDescriptiva projectData={projectData} />
+            <MemoriaDescriptiva projectData={projectData} idProyecto={idProyecto} />
           )}
         </div>
       </main>

@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -27,6 +28,18 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "faradyne-clave-solo-para-desarrollo-cambiar-en-produccion"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def normalizar_debug(cls, value):
+        """Acepta etiquetas de entorno usadas por algunas terminales locales."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod"}:
+                return False
+            if normalized in {"development", "dev", "debug"}:
+                return True
+        return value
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

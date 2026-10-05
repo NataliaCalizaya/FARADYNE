@@ -7,10 +7,9 @@ import { TOKEN_KEY, USER_KEY } from './api/client';
 import { Zap } from 'lucide-react';
 
 export function App() {
-  // Inicializa desde localStorage para que F5 no vuelva al login
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    () => Boolean(localStorage.getItem(TOKEN_KEY))
-  );
+  // Cada inicio de la aplicación muestra el login. La sesión se habilita
+  // únicamente después de autenticar al usuario en esta ejecución.
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [modoAuth, setModoAuth] = useState('login');
 
 
