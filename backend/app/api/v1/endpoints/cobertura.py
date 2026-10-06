@@ -5,6 +5,9 @@ HU05 - Cobertura SPDA por Esfera Rodante (ternas de mástiles).
   GET  /cobertura/proyecto/{idProyecto}          calcula y devuelve (no guarda)
   POST /cobertura/proyecto/{idProyecto}/guardar  calcula, guarda en
                                                  `resultado_simulacion` y devuelve
+
+Superficies devueltas: parches (ternas), uniones (banda entre ternas
+vecinas), faldas y casquetes (cierre del borde hasta el suelo).
 """
 
 import logging
@@ -81,6 +84,7 @@ def _calcular_cobertura(db: Session, id_proyecto: int) -> Dict[str, Any]:
         db.rollback()
         logger.exception("No se pudieron leer los mástiles del proyecto %s", id_proyecto)
 
+    # El service calcula la punta como posicion_z + altura.
     masts_for_eval = [
         {
             "id": m.get("id"),
@@ -93,7 +97,7 @@ def _calcular_cobertura(db: Session, id_proyecto: int) -> Dict[str, Any]:
         for m in masts
     ]
 
-    # 4. Evaluación.
+    # 4. Evaluación (parches + uniones + faldas/casquetes + muestreo de cubierta).
     try:
         evaluacion = SPDAService.evaluate_masts_coverage(
             masts=masts_for_eval,
@@ -115,11 +119,15 @@ def _calcular_cobertura(db: Session, id_proyecto: int) -> Dict[str, Any]:
         "mastiles": masts,
         "superficies_esfera": evaluacion.get("superficies_esfera", []),
         "triangulos_sin_esfera": evaluacion.get("triangulos_sin_esfera", []),
+        "uniones_sin_superficie": evaluacion.get("uniones_sin_superficie", []),
         "zonas_desprotegidas": evaluacion.get("zonas_desprotegidas", []),
         "prismas": evaluacion.get("prismas", []),
         "puntos_cobertura": evaluacion.get("puntos_cobertura", []),
         "puntos_desprotegidos": evaluacion.get("puntos_desprotegidos", []),
         "porcentaje_cobertura": evaluacion["porcentaje_cobertura"],
+        "area_total_m2": evaluacion.get("area_total_m2", 0.0),
+        "area_protegida_m2": evaluacion.get("area_protegida_m2", 0.0),
+        "paso_malla_m": evaluacion.get("paso_malla_m"),
         "advertencias": evaluacion["advertencias"],
     }
     return {"respuesta": respuesta, "evaluacion": evaluacion, "evaluacion_ok": evaluacion_ok}
@@ -141,6 +149,8 @@ def guardar_cobertura_mastiles(idProyecto: int, db: Session = Depends(get_db)) -
             detail="No se pudo evaluar la cobertura; no se guardó el resultado.",
         )
 
+    # (zonas_protegidas, zonas_vulnerables, mallas_cobertura); las mallas van sin
+    # vértices/triángulos (se regeneran con los mástiles y R).
     protegidas, vulnerables, mallas = SPDAService.resumen_para_persistencia(calculo["evaluacion"])
     try:
         fila = ResultadoSimulacionRepository.upsert_por_proyecto(

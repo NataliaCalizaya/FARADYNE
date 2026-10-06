@@ -6,37 +6,43 @@ Rodante, "por ternas de mástiles".
 
 Geometría (independiente por pieza, sin envolvente global):
 
-  * PARCHE: cada terna de la triangulación Delaunay (3 mástiles vecinos) tiene
-    su esfera de radio R apoyada en las 3 puntas. El parche es el triángulo
-    esférico entre las 3 puntas (lados en arcos de círculo máximo). Depende
-    únicamente de su terna.
+  * PARCHE: cada terna de mástiles cuya esfera de radio R, apoyada en sus 3
+    puntas, no contiene ninguna otra punta (criterio de esfera vacía, sin
+    Delaunay). El parche es el triángulo esférico entre las 3 puntas.
 
   * UNIÓN: dos ternas que comparten la arista AB se unen con una banda
     toroidal: la esfera pivota sobre AB (tocando siempre A y B) y su centro
-    recorre un arco entre los centros de las dos ternas. Cada posición aporta
-    el arco AB de la esfera. La banda es tangente a los dos parches en sus
-    bordes (empalme suave, sin grietas ni solapes) y depende únicamente de las
-    dos ternas que comparten la arista.
+    recorre un arco entre los centros de las dos ternas.
+
+  * FALDA: una arista del borde de la malla de ternas que da al exterior del
+    edificio (no a un patio) se prolonga hasta el suelo: la esfera pivota sobre
+    AB hasta quedar tangente a z = 0. La falda es la banda toroidal más el
+    triángulo esférico (A, B, punto de contacto con el suelo).
+
+  * CASQUETE: en un mástil donde terminan dos faldas, la esfera pivota sobre la
+    punta apoyada en el suelo (superficie de revolución alrededor de la vertical
+    de la punta) y cierra la esquina entre las dos faldas.
 
 Cada pieza se valida por separado y, si falla, no se dibuja ni protege:
 
-    sin_esfera_radio_insuficiente   los mástiles están muy separados
-    sin_esfera_puntas_colineales    las 3 puntas están alineadas
-    sin_esfera_no_apoyable          la esfera no puede apoyarse en las 3 puntas
-    sin_esfera_toca_suelo           la superficie llega a z <= 0
+    sin_esfera_radio_insuficiente   (diagnóstico) mástiles vecinos muy separados
+    sin_esfera_toca_suelo           la superficie llega a z <= 0 (p. ej. en un patio)
     sin_esfera_toca_cubierta        la superficie toca una cubierta
     sin_union_no_apoyable           la esfera no puede pivotar sobre la arista
+    sin_falda_*                     la falda / casquete no se puede dibujar
+
+Reglas de la falda:
+    * Solo en aristas exteriores; los patios interiores no llevan falda.
+    * No se dibuja si la punta supera 2R (la esfera no puede tocar punta y suelo).
+    * No se dibuja ninguna si la cota máxima de cubierta supera 60 m (se agrega
+      una advertencia: se requiere protección en los laterales).
 
 Evaluación: se muestrea la cubierta (polígonos del Modelo2D). Cada celda queda:
 
-    protegida             por debajo de la superficie de su terna
-    sobre_la_esfera       la cubierta queda por encima de la superficie
-    fuera_de_triangulacion  fuera de cualquier terna de mástiles
+    protegida               por debajo de alguna superficie (terna o falda)
+    sobre_la_esfera         la cubierta queda por encima de la superficie
+    fuera_de_triangulacion  fuera de cualquier terna o falda
     (o el motivo de la terna descartada que la contiene)
-
-La superficie de una terna, a efectos de evaluación, es el mínimo entre su
-esfera y los arcos de pivote de sus propias aristas, es decir, la misma
-superficie que se dibuja (parche + filetes de unión).
 
 Convención de coordenadas: sistema del Modelo2D/3D (x, y = planta en metros;
 z = altura). En el visor (three.js, Y hacia arriba) el punto se dibuja (x, z, -y).
@@ -44,6 +50,7 @@ z = altura). En el visor (three.js, Y hacia arriba) el punto se dibuja (x, z, -y
 
 import math
 from collections import Counter, defaultdict
+from itertools import combinations
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -59,16 +66,24 @@ from app.services.model3d_generator_service import (
 
 Vec3 = Tuple[float, float, float]
 
-EPS_COLINEAL = 1e-6      # |n| mínimo (m²) para considerar 3 puntas no colineales
-TOL_Z = 0.05             # margen de 5 cm
-MAX_MUESTRAS = 6000      # tope de celdas de cubierta a evaluar
-Z_SUELO = 0.0            # cota del suelo del modelo
+EPS_COLINEAL = 1e-6          # |n| mínimo (m²) para considerar 3 puntas no colineales
+TOL_Z = 0.05                 # margen de 5 cm
+TOL_PUNTA_EN_ESFERA = 1e-3   # m: una punta a menos de R - tol del centro está "dentro"
+MAX_MUESTRAS = 6000          # tope de celdas de cubierta a evaluar
+Z_SUELO = 0.0                # cota del suelo del modelo
+
+# Falda exterior
+ALTURA_MAX_FALDA = 60.0      # m: sobre esta cota máxima de cubierta no hay falda
+CIERRE_RENDIJAS = 0.10       # m: cierra rendijas entre polígonos contiguos
+ALCANCE_BORDE = 3.0          # m: hasta dónde se busca el borde del techo hacia afuera
+PASO_SONDA = 0.05            # m: paso de la sonda que clasifica exterior / patio
 
 # Malla de las superficies para el visor
 PASO_TELA = 1.0                  # separación objetivo de la malla (m)
 SUBDIV_MIN, SUBDIV_MAX = 6, 32   # lados por arista de un parche
 PASO_ANGULAR_RODADO = 2.0        # grados de giro del centro entre filas de una unión
 FILAS_MIN, FILAS_MAX = 3, 40
+TOL_MISMA_ESFERA = 0.05      # m: centros a menos de esto se consideran la misma esfera
 
 MOTIVO_RADIO = "sin_esfera_radio_insuficiente"
 MOTIVO_COLINEAL = "sin_esfera_puntas_colineales"
@@ -76,16 +91,22 @@ MOTIVO_NO_APOYABLE = "sin_esfera_no_apoyable"
 MOTIVO_TOCA_SUELO = "sin_esfera_toca_suelo"
 MOTIVO_TOCA_CUBIERTA = "sin_esfera_toca_cubierta"
 MOTIVO_UNION = "sin_union_no_apoyable"
+MOTIVO_FALDA_SUELO = "sin_falda_no_alcanza_suelo"
+MOTIVO_FALDA_PUNTA = "sin_falda_punta_interior"
+MOTIVO_FALDA_CUBIERTA = "sin_falda_toca_cubierta"
 MOTIVO_FUERA = "fuera_de_triangulacion"
 MOTIVO_SOBRE = "sobre_la_esfera"
 
 MENSAJES_MOTIVO = {
-    MOTIVO_RADIO: "el radio de la esfera no alcanza a tocar las 3 puntas (mástiles muy separados)",
-    MOTIVO_COLINEAL: "las 3 puntas están alineadas",
-    MOTIVO_NO_APOYABLE: "la esfera no puede apoyarse sobre las 3 puntas (diferencia de alturas excesiva)",
-    MOTIVO_TOCA_SUELO: "la esfera llega hasta el suelo entre las puntas (mástiles muy separados)",
-    MOTIVO_TOCA_CUBIERTA: "la esfera toca la cubierta entre las puntas (mástiles muy separados)",
-    MOTIVO_UNION: "la esfera no puede pivotar sobre esta arista sin tocar otra punta",
+    MOTIVO_RADIO: "que el radio de la esfera no alcanza a tocar las 3 puntas (mástiles muy separados)",
+    MOTIVO_COLINEAL: "que las 3 puntas están alineadas",
+    MOTIVO_NO_APOYABLE: "que la esfera no puede apoyarse sobre las 3 puntas (diferencia de alturas excesiva)",
+    MOTIVO_TOCA_SUELO: "que la esfera llega hasta el suelo entre las puntas (mástiles muy separados)",
+    MOTIVO_TOCA_CUBIERTA: "que la esfera toca la cubierta entre las puntas (mástiles muy separados)",
+    MOTIVO_UNION: "que la esfera no puede pivotar sobre esta arista sin tocar otra punta",
+    MOTIVO_FALDA_SUELO: "que la esfera no puede llegar al suelo pivotando sobre esta arista",
+    MOTIVO_FALDA_PUNTA: "otra punta queda dentro de la esfera al bajar la falda",
+    MOTIVO_FALDA_CUBIERTA: "la falda toca una cubierta más baja o el borde del techo: falta proteger esa zona",
     MOTIVO_FUERA: "zona fuera de cualquier terna de mástiles",
     MOTIVO_SOBRE: "la cubierta queda por encima de la esfera",
 }
@@ -95,13 +116,23 @@ ETIQUETAS_MOTIVO = {
     MOTIVO_RADIO: "mástiles muy separados",
     MOTIVO_COLINEAL: "mástiles alineados",
     MOTIVO_NO_APOYABLE: "esfera sin apoyo posible",
-    MOTIVO_TOCA_SUELO: "la esfera llega al suelo",
-    MOTIVO_TOCA_CUBIERTA: "la esfera toca la cubierta",
-    MOTIVO_UNION: "la esfera no puede pivotar sobre la arista",
+    MOTIVO_TOCA_SUELO: "que la esfera llega al suelo",
+    MOTIVO_TOCA_CUBIERTA: "que la esfera toca la cubierta",
+    MOTIVO_UNION: "que la esfera no puede pivotar sobre la arista",
+    MOTIVO_FALDA_SUELO: "que la esfera no llega al suelo",
+    MOTIVO_FALDA_PUNTA: "otra punta dentro de la esfera",
+    MOTIVO_FALDA_CUBIERTA: "que la falda toca la cubierta",
 }
 
 FORMA_PARCHE = "parche_esfera"
 FORMA_UNION = "union_esferas"
+FORMA_FALDA = "falda_esfera"
+FORMA_CASQUETE = "casquete_esfera"
+
+TIPO_FALDA = "falda"
+TIPO_CASQUETE = "casquete"
+TIPO_FALDA_SIN = "falda_sin_superficie"
+TIPO_UNION_SIN = "union_sin_superficie"
 
 
 # ============================================================
@@ -147,6 +178,18 @@ def _r3(v) -> List[float]:
 
 def _clave_xy(p: Vec3) -> Tuple[float, float]:
     return (round(p[0], 4), round(p[1], 4))
+
+
+def _punta(m: Dict[str, Any]) -> Vec3:
+    return (
+        float(m.get("posicion_x", 0.0)),
+        float(m.get("posicion_y", 0.0)),
+        float(m.get("posicion_z", 0.0)) + float(m.get("altura", 0.0)),
+    )
+
+
+def _limitar(valor: int, minimo: int, maximo: int) -> int:
+    return max(minimo, min(maximo, valor))
 
 
 # ============================================================
@@ -240,8 +283,25 @@ def _altura_desde_centros(
 
 
 # ============================================================
-# PIVOTE SOBRE UNA ARISTA (arco de centros de la unión)
+# PIVOTE SOBRE UNA ARISTA (arco de centros)
 # ============================================================
+
+def _punto_arco(m: Vec3, e1: Vec3, e2: Vec3, d: float, ang: float) -> Vec3:
+    radial = _add(_mul(e1, math.cos(ang)), _mul(e2, math.sin(ang)))
+    return _add(m, _mul(radial, d))
+
+
+def _trayecto_libre(
+    m: Vec3, e1: Vec3, e2: Vec3, d: float, delta: float,
+    radio: float, todas: List[Vec3], pasos: int = 13,
+) -> bool:
+    """True si a lo largo del arco ninguna otra punta queda dentro de la esfera."""
+    for k in range(1, pasos + 1):
+        p = _punto_arco(m, e1, e2, d, delta * k / pasos)
+        if any(math.dist(p, t) < radio - TOL_PUNTA_EN_ESFERA for t in todas):
+            return False
+    return True
+
 
 def _arco_de_pivote(
     a: Vec3, b: Vec3, c1: Vec3, c2: Vec3, radio: float, todas: List[Vec3]
@@ -276,25 +336,61 @@ def _arco_de_pivote(
     if abs(theta) < 1e-6:
         return None
 
-    def punto(ang: float) -> Vec3:
-        radial = _add(_mul(e1, math.cos(ang)), _mul(e2, math.sin(ang)))
-        return _add(m, _mul(radial, d))
-
-    tol = 1e-6 * max(radio, 1.0)
     candidatos: List[Tuple[float, float]] = []
     for delta in (theta, theta - math.copysign(2.0 * math.pi, theta)):
-        libre = True
-        for k in range(1, 13):
-            p = punto(delta * k / 13.0)
-            if any(math.dist(p, t) < radio - tol for t in todas):
-                libre = False
-                break
-        if libre:
-            candidatos.append((punto(delta / 2.0)[2], delta))
+        if _trayecto_libre(m, e1, e2, d, delta, radio, todas):
+            candidatos.append((_punto_arco(m, e1, e2, d, delta / 2.0)[2], delta))
 
     if not candidatos:
         return None
     delta = max(candidatos)[1]
+    return m, e1, e2, d, delta
+
+
+def _arco_falda(
+    a: Vec3, b: Vec3, c1: Vec3, radio: float, saliente: Vec3
+) -> Optional[Tuple[Vec3, Vec3, Vec3, float, float]]:
+    """Arco de centros al pivotar sobre AB hacia afuera hasta tocar el suelo.
+
+    Parte del centro `c1` de la terna y gira en el sentido que aleja el centro
+    del edificio (`saliente`: normal horizontal exterior de la arista) hasta que
+    el centro llega a z = R (esfera tangente a z = 0).
+
+    Devuelve (m, e1, e2, d, delta) con el mismo formato que `_arco_de_pivote`.
+    """
+    m = _mul(_add(a, b), 0.5)
+    semi = math.dist(a, b) / 2.0
+    d2 = radio * radio - semi * semi
+    if d2 <= 1e-12:
+        return None
+    d = math.sqrt(d2)
+
+    if c1[2] <= radio + TOL_Z:
+        return None  # la esfera de la terna ya está a la altura del suelo
+
+    eje_ab = _unit(_sub(b, a))
+    r1 = _sub(c1, m)
+    n1 = _norm(r1)
+    if n1 < 1e-9:
+        return None
+    e1 = _mul(r1, 1.0 / n1)
+    e2 = _unit(_cross(eje_ab, e1))
+    if _dot(e2, saliente) < 0.0:
+        e2 = _mul(e2, -1.0)  # t > 0 aleja el centro del edificio
+
+    # z(t) = m_z + d * kz * cos(t - fase) = R
+    kz = math.hypot(e1[2], e2[2])
+    if kz < 1e-9:
+        return None
+    q = (radio - m[2]) / (d * kz)
+    if abs(q) > 1.0:
+        return None
+    fase = math.atan2(e2[2], e1[2])
+    base = math.acos(q)
+    dos_pi = 2.0 * math.pi
+    delta = min((fase + base) % dos_pi, (fase - base) % dos_pi)
+    if delta < 1e-6:
+        return None
     return m, e1, e2, d, delta
 
 
@@ -303,7 +399,7 @@ def _centros_arco(
 ) -> np.ndarray:
     """Posiciones del centro a lo largo del arco (los extremos son c1 y c2)."""
     m, e1, e2, d, delta = arco
-    filas = max(FILAS_MIN, min(FILAS_MAX, math.ceil(math.degrees(abs(delta)) / PASO_ANGULAR_RODADO)))
+    filas = _limitar(math.ceil(math.degrees(abs(delta)) / PASO_ANGULAR_RODADO), FILAS_MIN, FILAS_MAX)
     ang = delta * np.arange(filas + 1) / filas
     centros = np.asarray(m) + d * (
         np.cos(ang)[:, None] * np.asarray(e1) + np.sin(ang)[:, None] * np.asarray(e2)
@@ -320,7 +416,7 @@ def _centros_arco(
 def _subdivisiones_terna(puntas: Tuple[Vec3, Vec3, Vec3]) -> int:
     """Lados por arista de un parche; depende solo de su propia terna."""
     largo = max(math.dist(puntas[i], puntas[(i + 1) % 3]) for i in range(3))
-    return max(SUBDIV_MIN, min(SUBDIV_MAX, math.ceil(largo / PASO_TELA)))
+    return _limitar(math.ceil(largo / PASO_TELA), SUBDIV_MIN, SUBDIV_MAX)
 
 
 def _malla_parche(
@@ -354,20 +450,37 @@ def _malla_parche(
     return vertices, triangulos
 
 
-def _malla_union(
-    a: Vec3, b: Vec3, centros: np.ndarray, radio: float, n: int
-) -> Tuple[np.ndarray, List[List[int]]]:
-    """Banda toroidal: el arco AB de la esfera para cada posición del centro."""
-    A = np.asarray(a, dtype=float)
-    B = np.asarray(b, dtype=float)
-    ua = A - centros
-    ua /= np.linalg.norm(ua, axis=1, keepdims=True)
-    ub = B - centros
-    ub /= np.linalg.norm(ub, axis=1, keepdims=True)
+def _slerp(u: np.ndarray, v: np.ndarray, t: np.ndarray) -> np.ndarray:
+    """Interpolación esférica fila a fila entre vectores unitarios: (K, len(t), 3)."""
+    w = np.arccos(np.clip(np.sum(u * v, axis=1), -1.0, 1.0))[:, None]
+    sw = np.sin(w)
+    seguro = sw > 1e-9
+    sw_seguro = np.where(seguro, sw, 1.0)
+    tt = t[None, :]
+    s0 = np.where(seguro, np.sin((1.0 - tt) * w) / sw_seguro, 1.0 - tt)
+    s1 = np.where(seguro, np.sin(tt * w) / sw_seguro, tt)
+    d = s0[:, :, None] * u[:, None, :] + s1[:, :, None] * v[:, None, :]
+    return d / np.linalg.norm(d, axis=2, keepdims=True)
 
-    t = np.linspace(0.0, 1.0, n + 1)
-    d = (1.0 - t)[None, :, None] * ua[:, None, :] + t[None, :, None] * ub[:, None, :]
-    d /= np.linalg.norm(d, axis=2, keepdims=True)
+
+def _malla_banda(
+    p: Any, q: Any, centros: np.ndarray, radio: float, n: int,
+    colapsa_ini: bool = True, colapsa_fin: bool = True,
+) -> Tuple[np.ndarray, List[List[int]]]:
+    """Banda: para cada centro, el arco de la esfera entre los puntos P y Q.
+
+    `p` y `q` son un punto fijo o un punto por fila. Si el extremo es fijo para
+    todas las esferas (la punta de un mástil), la banda colapsa a un punto ahí
+    y se omiten los triángulos de área cero.
+    """
+    P = np.broadcast_to(np.asarray(p, dtype=float), centros.shape)
+    Q = np.broadcast_to(np.asarray(q, dtype=float), centros.shape)
+    ua = P - centros
+    ua = ua / np.linalg.norm(ua, axis=1, keepdims=True)
+    ub = Q - centros
+    ub = ub / np.linalg.norm(ub, axis=1, keepdims=True)
+
+    d = _slerp(ua, ub, np.linspace(0.0, 1.0, n + 1))
     vertices = (centros[:, None, :] + radio * d).reshape(-1, 3)
 
     filas = len(centros) - 1
@@ -379,52 +492,131 @@ def _malla_union(
             p01 = p00 + 1
             p10 = (k + 1) * ancho + j
             p11 = p10 + 1
-            # En j = 0 (punta A) y j = n - 1 (punta B) la banda colapsa al punto:
-            # se omite el triángulo de área cero.
-            if j > 0:
+            if j > 0 or not colapsa_ini:
                 triangulos.append([p00, p10, p01])
-            if j < n - 1:
+            if j < n - 1 or not colapsa_fin:
                 triangulos.append([p01, p10, p11])
     return vertices, triangulos
 
 
+def _malla_union(
+    a: Vec3, b: Vec3, centros: np.ndarray, radio: float, n: int
+) -> Tuple[np.ndarray, List[List[int]]]:
+    """Banda toroidal: el arco AB de la esfera para cada posición del centro."""
+    return _malla_banda(a, b, centros, radio, n)
+
+
 # ============================================================
-# TRIANGULACIÓN DE MÁSTILES
+# TERNAS DE MÁSTILES (esfera vacía, sin Delaunay)
 # ============================================================
 
-def _punta(m: Dict[str, Any]) -> Vec3:
-    return (
-        float(m.get("posicion_x", 0.0)),
-        float(m.get("posicion_y", 0.0)),
-        float(m.get("posicion_z", 0.0)) + float(m.get("altura", 0.0)),
-    )
-
-
-def _ternas_de_mastiles(masts: List[Dict[str, Any]]) -> List[Tuple[Dict[str, Any], ...]]:
-    """Delaunay en planta: cada triángulo es un parche independiente."""
+def _mastiles_unicos(masts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Un mástil por (x, y): si hay varios, el de punta más alta."""
     por_xy: Dict[Tuple[float, float], Dict[str, Any]] = {}
     for m in masts:
-        clave = (
-            round(float(m.get("posicion_x", 0.0)), 4),
-            round(float(m.get("posicion_y", 0.0)), 4),
-        )
-        previo = por_xy.get(clave)
+        k = _clave_xy(_punta(m))
+        previo = por_xy.get(k)
         if previo is None or _punta(m)[2] > _punta(previo)[2]:
-            por_xy[clave] = m  # dos mástiles en el mismo XY: vale el más alto
+            por_xy[k] = m
+    return list(por_xy.values())
 
-    if len(por_xy) < 3:
+
+def _ternas_de_mastiles(masts: List[Dict[str, Any]], radio: float):
+    """Todas las ternas cuya esfera de radio R, apoyada en sus 3 puntas, no
+    contiene otra punta. Sin Delaunay y sin filtrar por cubierta."""
+    ms = _mastiles_unicos(masts)
+    n = len(ms)
+    if n < 3:
         return []
 
-    triangulos = triangulate(MultiPoint(list(por_xy.keys())))
-    ternas: List[Tuple[Dict[str, Any], ...]] = []
-    for t in triangulos:
-        coords = list(t.exterior.coords)[:3]
-        try:
-            ternas.append(tuple(por_xy[(round(x, 4), round(y, 4))] for x, y in coords))
-        except KeyError:
+    puntas = [_punta(m) for m in ms]
+    P = np.array(puntas, dtype=float)
+    D = np.linalg.norm(P[:, None, :] - P[None, :, :], axis=2)
+    idx = np.arange(n)
+    # Una terna solo puede existir si sus 3 lados son < 2R
+    vecinos = [
+        set(int(j) for j in np.nonzero((D[i] < 2.0 * radio) & (idx > i))[0])
+        for i in range(n)
+    ]
+
+    validas = []  # ((i, j, k), centro)
+    for i in range(n):
+        for j in sorted(vecinos[i]):
+            for k in sorted(vecinos[i] & vecinos[j]):
+                esfera, _ = esfera_por_tres_puntos(puntas[i], puntas[j], puntas[k], radio)
+                if esfera is None:
+                    continue
+                dist = np.linalg.norm(P - np.asarray(esfera["centro"]), axis=1)
+                dist[[i, j, k]] = np.inf
+                if np.any(dist < radio - TOL_PUNTA_EN_ESFERA):
+                    continue  # otra punta queda dentro de la esfera
+                validas.append(((i, j, k), esfera["centro"]))
+
+    # Ternas con el mismo centro = misma esfera (cuaternas cocirculares):
+    # se triangulan en planta solo para no dibujar parches duplicados.
+        # Ternas cuyo centro coincide (dentro de TOL_MISMA_ESFERA) = misma esfera
+    # (cuaternas cosféricas): se triangulan en planta para no dibujar parches
+    # duplicados.
+    grupos: List[Dict[str, Any]] = []
+    for ijk, c in validas:
+        c = np.asarray(c, dtype=float)
+        for g in grupos:
+            if np.linalg.norm(g["centro"] - c) < TOL_MISMA_ESFERA:
+                g["lista"].append(ijk)
+                break
+        else:
+            grupos.append({"centro": c, "lista": [ijk]})
+
+    resultado: List[Tuple[int, int, int]] = []
+    for g in grupos:
+        lista = g["lista"]
+        if len(lista) == 1:
+            resultado.append(lista[0])
             continue
+        pts_idx = sorted(set().union(*lista))
+        pos = {(round(P[i, 0], 4), round(P[i, 1], 4)): i for i in pts_idx}
+        for t in triangulate(MultiPoint([(P[i, 0], P[i, 1]) for i in pts_idx])):
+            try:
+                resultado.append(tuple(
+                    pos[(round(x, 4), round(y, 4))] for x, y in list(t.exterior.coords)[:3]
+                ))
+            except KeyError:
+                continue
+
+    ternas = [tuple(ms[i] for i in t) for t in resultado]
     ternas.sort(key=lambda tr: tuple(sorted(str(m.get("id", "")) for m in tr)))
     return ternas
+
+
+def _ternas_muy_separadas(
+    masts: List[Dict[str, Any]], ids_existentes: set, radio: float
+):
+    """Diagnóstico: triángulos de Delaunay (solo como sugerencia de vecindad) que
+    no son terna y fallan únicamente porque los mástiles están muy separados
+    (radio de la circunferencia por las 3 puntas >= R). No generan superficie."""
+    ms = _mastiles_unicos(masts)
+    if len(ms) < 3:
+        return []
+    por_xy = {_clave_xy(_punta(m)): m for m in ms}
+
+    salida = []
+    vistas = set()
+    for tri in triangulate(MultiPoint(list(por_xy.keys()))):
+        try:
+            terna = tuple(
+                por_xy[(round(x, 4), round(y, 4))] for x, y in list(tri.exterior.coords)[:3]
+            )
+        except KeyError:
+            continue
+        clave = frozenset(str(m.get("id", "")) for m in terna)
+        if clave in ids_existentes or clave in vistas:
+            continue
+        _, motivo = esfera_por_tres_puntos(*(_punta(m) for m in terna), radio)
+        if motivo != MOTIVO_RADIO:
+            continue
+        vistas.add(clave)
+        salida.append(terna)
+    return salida
 
 
 def _dentro_triangulo_np(
@@ -440,36 +632,79 @@ def _dentro_triangulo_np(
     return (l1 >= -1e-9) & (l2 >= -1e-9) & (l3 >= -1e-9)
 
 
+def _nueva_terna(
+    idx: int, terna: Tuple[Dict[str, Any], ...], radio: float, diagnostico: bool = False
+) -> Dict[str, Any]:
+    puntas = tuple(_punta(m) for m in terna)
+    xy = tuple((p[0], p[1]) for p in puntas)
+    esfera, motivo = esfera_por_tres_puntos(*puntas, radio)
+
+    rho = esfera["rho"] if esfera is not None else None
+    if rho is None and motivo == MOTIVO_RADIO:
+        o = circuncentro_3d(*puntas)
+        if o is not None:
+            rho = _norm(_sub(o, puntas[0]))
+
+    return {
+        "idx": idx,
+        "ids": [str(m.get("id", "")) for m in terna],
+        "puntas": puntas,
+        "xy": xy,
+        "esfera": esfera,
+        "motivo": motivo,
+        "rho": rho,
+        "id": f"S{idx}" if esfera is not None else f"T{idx}",
+        "centros_union": [],  # arcos de pivote de sus aristas (para evaluar)
+        "diagnostico": diagnostico,
+    }
+
+
 def _preparar_ternas(
     masts: List[Dict[str, Any]], radio: float
 ) -> Tuple[List[Dict[str, Any]], List[Vec3]]:
-    """Ternas de mástiles con su esfera (o el motivo por el que no existe)."""
+    """Ternas de mástiles con su esfera de radio R (esfera vacía)."""
     todas = [_punta(m) for m in masts]
-    ternas: List[Dict[str, Any]] = []
-
-    for idx, terna in enumerate(_ternas_de_mastiles(masts), start=1):
-        puntas = tuple(_punta(m) for m in terna)
-        xy = tuple((p[0], p[1]) for p in puntas)
-        esfera, motivo = esfera_por_tres_puntos(*puntas, radio)
-
-        rho = esfera["rho"] if esfera is not None else None
-        if rho is None and motivo == MOTIVO_RADIO:
-            o = circuncentro_3d(*puntas)
-            if o is not None:
-                rho = _norm(_sub(o, puntas[0]))
-
-        ternas.append({
-            "idx": idx,
-            "ids": [str(m.get("id", "")) for m in terna],
-            "puntas": puntas,
-            "xy": xy,
-            "esfera": esfera,
-            "motivo": motivo,
-            "rho": rho,
-            "id": f"S{idx}" if esfera is not None else f"T{idx}",
-            "centros_union": [],  # arcos de pivote de sus aristas (para evaluar)
-        })
+    ternas = [
+        _nueva_terna(idx, terna, radio)
+        for idx, terna in enumerate(_ternas_de_mastiles(masts, radio), start=1)
+    ]
     return ternas, todas
+
+
+def _agregar_diagnostico(
+    ternas: List[Dict[str, Any]], masts: List[Dict[str, Any]], radio: float,
+    sx: np.ndarray, sy: np.ndarray,
+) -> None:
+    """Agrega las ternas 'mástiles muy separados' que contienen cubierta."""
+    if sx.size == 0:
+        return
+    existentes = {frozenset(t["ids"]) for t in ternas}
+    for terna in _ternas_muy_separadas(masts, existentes, radio):
+        nueva = _nueva_terna(len(ternas) + 1, terna, radio, diagnostico=True)
+        if _dentro_triangulo_np(nueva["xy"], sx, sy).any():
+            ternas.append(nueva)
+
+
+def _filtrar_diagnosticos(
+    ternas: List[Dict[str, Any]],
+    muestras: List[Dict[str, Any]],
+    resultados: List[Tuple[bool, Optional[str], Optional[str]]],
+) -> List[Dict[str, Any]]:
+    """Conserva el diagnóstico solo donde queda cubierta sin proteger."""
+    if not any(t.get("diagnostico") for t in ternas) or not muestras:
+        return ternas
+    sx = np.array([m["x"] for m in muestras], dtype=float)
+    sy = np.array([m["y"] for m in muestras], dtype=float)
+    desprotegida = np.array([not r[0] for r in resultados], dtype=bool)
+
+    salida = []
+    for t in ternas:
+        if t.get("diagnostico"):
+            dentro = _dentro_triangulo_np(t["xy"], sx, sy)
+            if not np.any(dentro & desprotegida):
+                continue
+        salida.append(t)
+    return salida
 
 
 def _descartar(terna: Dict[str, Any], motivo: str) -> None:
@@ -529,13 +764,13 @@ def _toca_cubierta_parche(
 
 
 # ============================================================
-# CONSTRUCCIÓN DE PARCHES Y UNIONES
+# UNIONES ENTRE PARCHES
 # ============================================================
 
 def _construir_uniones(
     ternas: List[Dict[str, Any]], todas: List[Vec3], radio: float, regiones: List[Any]
 ) -> List[Dict[str, Any]]:
-    """Una unión por cada arista compartida por dos parches que sobrevivieron."""
+    """Una unión por cada par de parches que sobrevivieron y comparten arista."""
     aristas: Dict[Any, List[Tuple[int, int]]] = defaultdict(list)
     for pos, t in enumerate(ternas):
         if t["esfera"] is None:
@@ -546,53 +781,320 @@ def _construir_uniones(
 
     uniones: List[Dict[str, Any]] = []
     for lista in aristas.values():
-        if len(lista) != 2:
-            continue  # arista del borde de la triangulación: no hay con qué unirla
-        (p1, i1), (p2, _i2) = lista
-        t1, t2 = ternas[p1], ternas[p2]
-        a, b = t1["puntas"][i1], t1["puntas"][(i1 + 1) % 3]
-        c1, c2 = t1["esfera"]["centro"], t2["esfera"]["centro"]
+        if len(lista) < 2:
+            continue  # arista del borde de la malla: no hay con qué unirla
+        for (p1, i1), (p2, _i2) in combinations(lista, 2):
+            t1, t2 = ternas[p1], ternas[p2]
+            a, b = t1["puntas"][i1], t1["puntas"][(i1 + 1) % 3]
+            c1, c2 = t1["esfera"]["centro"], t2["esfera"]["centro"]
 
-        if math.dist(c1, c2) < 1e-7:
-            continue  # misma esfera: los dos parches ya se tocan sin unión
+            if math.dist(c1, c2) < TOL_MISMA_ESFERA:
+                continue  # misma esfera: los dos parches ya se tocan sin unión
 
-        union: Dict[str, Any] = {
-            "id": f"U{len(uniones) + 1}",
-            "mastiles_ids": sorted(set(t1["ids"] + t2["ids"])),
-            "ternas_ids": [t1["id"], t2["id"]],
-            "a": a,
-            "b": b,
-            "radio": radio,
-            "valida": False,
-            "motivo": None,
-        }
+            union: Dict[str, Any] = {
+                "id": f"U{len(uniones) + 1}",
+                "mastiles_ids": sorted(set(t1["ids"] + t2["ids"])),
+                "ternas_ids": [t1["id"], t2["id"]],
+                "a": a,
+                "b": b,
+                "radio": radio,
+                "valida": False,
+                "motivo": None,
+            }
 
-        arco = _arco_de_pivote(a, b, c1, c2, radio, todas)
-        if arco is None:
-            union["motivo"] = MOTIVO_UNION
+            arco = _arco_de_pivote(a, b, c1, c2, radio, todas)
+            if arco is None:
+                union["motivo"] = MOTIVO_UNION
+                uniones.append(union)
+                continue
+
+            centros = _centros_arco(arco, c1, c2)
+            vertices, triangulos = _malla_union(a, b, centros, radio, max(t1["n"], t2["n"]))
+            union.update(arco=arco, centros=centros, vertices=vertices, triangulos=triangulos)
+
+            if not np.all(np.isfinite(vertices)):
+                union["motivo"] = MOTIVO_UNION
+            elif _toca_suelo(vertices):
+                union["motivo"] = MOTIVO_TOCA_SUELO
+            elif regiones and _toca_cubierta_union(vertices, regiones, TOL_Z):
+                union["motivo"] = MOTIVO_TOCA_CUBIERTA
+            else:
+                union["valida"] = True
+                # Los arcos de pivote forman parte de la superficie de las dos ternas.
+                t1["centros_union"].append(centros)
+                t2["centros_union"].append(centros)
             uniones.append(union)
-            continue
-
-        centros = _centros_arco(arco, c1, c2)
-        vertices, triangulos = _malla_union(a, b, centros, radio, max(t1["n"], t2["n"]))
-        union.update(arco=arco, centros=centros, vertices=vertices, triangulos=triangulos)
-
-        # Los arcos de pivote forman parte de la superficie de las dos ternas.
-        t1["centros_union"].append(centros)
-        t2["centros_union"].append(centros)
-
-        if not np.all(np.isfinite(vertices)):
-            union["motivo"] = MOTIVO_UNION
-        elif _toca_suelo(vertices):
-            union["motivo"] = MOTIVO_TOCA_SUELO
-        elif regiones and _toca_cubierta_union(vertices, regiones, TOL_Z):
-            union["motivo"] = MOTIVO_TOCA_CUBIERTA
-        else:
-            union["valida"] = True
-        uniones.append(union)
 
     return uniones
 
+
+# ============================================================
+# FALDA EXTERIOR (aristas del borde -> suelo) Y CASQUETES DE ESQUINA
+# ============================================================
+
+def _huella_edificio(regiones: List[Any]) -> Tuple[Optional[Any], Optional[Any]]:
+    """(huella, sólido): la huella es la unión de las cubiertas con las rendijas
+    cerradas (sus anillos interiores son los patios); el sólido es la misma
+    huella con los patios rellenos."""
+    polys = [p for p, _f, _r in regiones]
+    if not polys:
+        return None, None
+    huella = unary_union(polys)
+    huella = huella.buffer(CIERRE_RENDIJAS, join_style="mitre").buffer(-CIERRE_RENDIJAS, join_style="mitre")
+    if huella.is_empty:
+        return None, None
+    partes = list(huella.geoms) if hasattr(huella, "geoms") else [huella]
+    solido = unary_union([Polygon(p.exterior) for p in partes if p.geom_type == "Polygon"])
+    return huella, solido
+
+
+def _clasificar_borde(
+    a: Vec3, b: Vec3, tercero: Vec3, huella: Any, solido: Any
+) -> Tuple[str, Tuple[float, float]]:
+    """Clasifica una arista del borde de la malla de ternas.
+
+    Sale desde su punto medio hacia afuera (lado opuesto a la 3ª punta de su
+    terna) hasta encontrar el borde del techo:
+      "exterior": al salir del techo cae fuera de la huella.
+      "patio":    al salir del techo cae dentro de un hueco de la huella.
+      "interior": el techo continúa (la arista no es borde del edificio).
+    Devuelve (clase, normal_horizontal_exterior).
+    """
+    ex, ey = b[0] - a[0], b[1] - a[1]
+    largo = math.hypot(ex, ey)
+    if largo < 1e-9:
+        return "interior", (0.0, 0.0)
+    nx, ny = -ey / largo, ex / largo
+    mx, my = (a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0
+    if (tercero[0] - mx) * nx + (tercero[1] - my) * ny > 0.0:
+        nx, ny = -nx, -ny
+
+    pasos = np.arange(PASO_SONDA, ALCANCE_BORDE + 1e-9, PASO_SONDA)
+    xs, ys = mx + nx * pasos, my + ny * pasos
+    libres = np.nonzero(~shapely.contains_xy(huella, xs, ys))[0]
+    if libres.size == 0:
+        return "interior", (nx, ny)
+    k = libres[0]
+    if bool(shapely.contains_xy(solido, xs[k], ys[k])):
+        return "patio", (nx, ny)
+    return "exterior", (nx, ny)
+
+
+def _falda_de_arista(
+    ternas_t: Dict[str, Any], i: int, normal: Tuple[float, float],
+    todas: List[Vec3], radio: float, regiones: List[Any],
+) -> Dict[str, Any]:
+    """Falda de la arista i de una terna: banda hasta el suelo + triángulo esférico."""
+    t = ternas_t
+    a, b = t["puntas"][i], t["puntas"][(i + 1) % 3]
+    falda: Dict[str, Any] = {
+        "tipo": TIPO_FALDA,
+        "forma": FORMA_FALDA,
+        "mastiles_ids": [t["ids"][i], t["ids"][(i + 1) % 3]],
+        "ternas_ids": [t["id"]],
+        "puntas": [a, b],
+        "normal": normal,
+        "radio": radio,
+        "valida": False,
+        "motivo": None,
+    }
+
+    arco = _arco_falda(a, b, t["esfera"]["centro"], radio, (normal[0], normal[1], 0.0))
+    if arco is None:
+        falda["motivo"] = MOTIVO_FALDA_SUELO
+        return falda
+
+    m, e1, e2, d, delta = arco
+    if not _trayecto_libre(m, e1, e2, d, delta, radio, todas):
+        falda["motivo"] = MOTIVO_FALDA_PUNTA
+        return falda
+
+    c_fin = _punto_arco(m, e1, e2, d, delta)
+    centros = _centros_arco(arco, t["esfera"]["centro"], c_fin)
+    suelo = (c_fin[0], c_fin[1], 0.0)
+    n = _limitar(math.ceil(math.dist(a, b) / PASO_TELA), SUBDIV_MIN, SUBDIV_MAX)
+    v_banda, t_banda = _malla_union(a, b, centros, radio, n)
+    v_tri, t_tri = _malla_parche((a, b, suelo), c_fin, radio, n)
+    vertices = np.vstack([v_banda, v_tri])
+    triangulos = t_banda + [[x + len(v_banda) for x in tri] for tri in t_tri]
+
+    falda.update(
+        centro_fin=c_fin,
+        centro_circulo=m,
+        radio_circulo=d,
+        centros=centros,
+        vertices=vertices,
+        triangulos=triangulos,
+        region=MultiPoint(vertices[:, :2]).convex_hull,
+    )
+    if not np.all(np.isfinite(vertices)) or np.min(vertices[:, 2]) < -1e-6:
+        falda["motivo"] = MOTIVO_FALDA_SUELO
+    elif _toca_cubierta_union(vertices, regiones, TOL_Z):
+        falda["motivo"] = MOTIVO_FALDA_CUBIERTA
+    else:
+        falda["valida"] = True
+    return falda
+
+
+def _casquete_de_esquina(
+    punta: Vec3, mastil_id: str, f1: Dict[str, Any], f2: Dict[str, Any],
+    todas: List[Vec3], radio: float, regiones: List[Any],
+) -> Optional[Dict[str, Any]]:
+    """Casquete que cierra la esquina entre dos faldas que terminan en un mástil.
+
+    La esfera pivota sobre la punta apoyada en el suelo: su centro recorre la
+    circunferencia horizontal (z = R) de radio sqrt(za (2R - za)) alrededor de la
+    punta. Cada posición aporta el meridiano de la esfera entre la punta y el
+    punto de contacto con el suelo.
+    """
+    za = punta[2]
+    rho = math.sqrt(max(za * (2.0 * radio - za), 0.0))
+    if rho < 1e-6:
+        return None
+
+    c1, c2 = f1["centro_fin"], f2["centro_fin"]
+    th1 = math.atan2(c1[1] - punta[1], c1[0] - punta[0])
+    th2 = math.atan2(c2[1] - punta[1], c2[0] - punta[0])
+    delta = (th2 - th1 + math.pi) % (2.0 * math.pi) - math.pi
+    if abs(delta) < 1e-6:
+        return None  # ambas faldas terminan en la misma esfera: no hay esquina
+    alterno = delta - math.copysign(2.0 * math.pi, delta)
+
+    # De los dos arcos se toma el que da hacia el exterior de las dos aristas.
+    nx = f1["normal"][0] + f2["normal"][0]
+    ny = f1["normal"][1] + f2["normal"][1]
+
+    def puntaje(dl: float) -> float:
+        ang = th1 + dl / 2.0
+        return math.cos(ang) * nx + math.sin(ang) * ny
+
+    dl = max((delta, alterno), key=puntaje)
+
+    filas = _limitar(math.ceil(math.degrees(abs(dl)) / PASO_ANGULAR_RODADO), FILAS_MIN, FILAS_MAX)
+    ang = th1 + dl * np.arange(filas + 1) / filas
+    centros = np.column_stack([
+        punta[0] + rho * np.cos(ang),
+        punta[1] + rho * np.sin(ang),
+        np.full(filas + 1, radio),
+    ])
+    centros[0], centros[-1] = c1, c2
+    suelo = centros.copy()
+    suelo[:, 2] = 0.0
+
+    omega = math.acos(max(-1.0, min(1.0, (radio - za) / radio)))
+    n = _limitar(math.ceil(radio * omega / PASO_TELA), SUBDIV_MIN, SUBDIV_MAX)
+    vertices, triangulos = _malla_banda(punta, suelo, centros, radio, n, colapsa_fin=False)
+
+    casquete: Dict[str, Any] = {
+        "tipo": TIPO_CASQUETE,
+        "forma": FORMA_CASQUETE,
+        "mastiles_ids": [mastil_id],
+        "ternas_ids": sorted(set(f1["ternas_ids"] + f2["ternas_ids"])),
+        "puntas": [punta],
+        "radio": radio,
+        "valida": False,
+        "motivo": None,
+        "centro_circulo": (punta[0], punta[1], radio),
+        "radio_circulo": rho,
+        "centros": centros,
+        "vertices": vertices,
+        "triangulos": triangulos,
+        "region": MultiPoint(vertices[:, :2]).convex_hull,
+    }
+
+    todas_np = np.asarray(todas, dtype=float).reshape(-1, 3)
+    dist = np.linalg.norm(centros[:, None, :] - todas_np[None, :, :], axis=2)
+    if not np.all(np.isfinite(vertices)) or np.min(vertices[:, 2]) < -1e-6:
+        casquete["motivo"] = MOTIVO_FALDA_SUELO
+    elif np.any(dist < radio - TOL_PUNTA_EN_ESFERA):
+        casquete["motivo"] = MOTIVO_FALDA_PUNTA
+    elif _toca_cubierta_union(vertices, regiones, TOL_Z):
+        casquete["motivo"] = MOTIVO_FALDA_CUBIERTA
+    else:
+        casquete["valida"] = True
+    return casquete
+
+
+def _construir_faldas(
+    ternas: List[Dict[str, Any]], todas: List[Vec3], radio: float,
+    regiones: List[Any], cota_max: float,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Faldas de las aristas exteriores del borde de la malla y casquetes de esquina.
+
+    Devuelve (faldas, info). `info` informa lo que no se dibujó por regla:
+      edificio_alto        cota máxima de cubierta > ALTURA_MAX_FALDA
+      omitidas_punta_alta  aristas cuya punta supera 2R
+    """
+    info: Dict[str, Any] = {
+        "edificio_alto": False,
+        "omitidas_punta_alta": 0,
+        "altura_max_cubierta": cota_max,
+    }
+    if not regiones:
+        return [], info
+    if cota_max > ALTURA_MAX_FALDA:
+        info["edificio_alto"] = True
+        return [], info
+
+    huella, solido = _huella_edificio(regiones)
+    if huella is None:
+        return [], info
+
+    aristas: Dict[Any, List[Tuple[int, int]]] = defaultdict(list)
+    for pos, t in enumerate(ternas):
+        if t["esfera"] is None:
+            continue
+        for i in range(3):
+            a, b = t["puntas"][i], t["puntas"][(i + 1) % 3]
+            aristas[frozenset((_clave_xy(a), _clave_xy(b)))].append((pos, i))
+
+    faldas: List[Dict[str, Any]] = []
+    por_vertice: Dict[Tuple[float, float], List[Dict[str, Any]]] = defaultdict(list)
+    for lista in aristas.values():
+        if len(lista) != 1:
+            continue  # arista compartida: la resuelve una unión
+        pos, i = lista[0]
+        t = ternas[pos]
+        a, b, tercero = t["puntas"][i], t["puntas"][(i + 1) % 3], t["puntas"][(i + 2) % 3]
+
+        clase, normal = _clasificar_borde(a, b, tercero, huella, solido)
+        if clase != "exterior":
+            continue  # patio o arista interior: sin falda
+        if max(a[2], b[2]) > 2.0 * radio - 1e-6:
+            info["omitidas_punta_alta"] += 1
+            continue
+
+        falda = _falda_de_arista(t, i, normal, todas, radio, regiones)
+        falda["id"] = f"F{len(faldas) + 1}"
+        faldas.append(falda)
+        if falda["valida"]:
+            por_vertice[_clave_xy(a)].append(falda)
+            por_vertice[_clave_xy(b)].append(falda)
+
+    # Esquinas: un mástil donde terminan exactamente dos faldas válidas.
+    punta_por_clave = {_clave_xy(p): p for t in ternas for p in t["puntas"]}
+    id_por_clave = {
+        _clave_xy(p): t["ids"][k] for t in ternas for k, p in enumerate(t["puntas"])
+    }
+    nuevos: List[Dict[str, Any]] = []
+    for clave, lista in por_vertice.items():
+        if len(lista) != 2:
+            continue
+        casquete = _casquete_de_esquina(
+            punta_por_clave[clave], id_por_clave[clave], lista[0], lista[1],
+            todas, radio, regiones,
+        )
+        if casquete is not None:
+            nuevos.append(casquete)
+    for k, c in enumerate(nuevos, start=1):
+        c["id"] = f"C{k}"
+    faldas.extend(nuevos)
+    return faldas, info
+
+
+# ============================================================
+# CONSTRUCCIÓN DE PARCHES, UNIONES Y FALDAS
+# ============================================================
 
 def _construir_superficies(
     masts: List[Dict[str, Any]],
@@ -600,11 +1102,12 @@ def _construir_superficies(
     subdivisiones: Optional[int],
     muestras: List[Dict[str, Any]],
     regiones: List[Any],
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Valida cada parche por separado y después cada unión por separado.
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """Valida cada parche por separado y después cada unión y falda por separado.
 
-    Devuelve (ternas, uniones). Las ternas descartadas quedan con
-    `esfera = None` y su motivo; las uniones inválidas con `valida = False`.
+    Devuelve (ternas, uniones, faldas, info_faldas). Las ternas descartadas
+    quedan con `esfera = None` y su motivo; las uniones y faldas inválidas con
+    `valida = False`. Sin cubierta (`regiones` vacío) no se generan faldas.
     """
     ternas, todas = _preparar_ternas(masts, radio)
 
@@ -613,8 +1116,6 @@ def _construir_superficies(
     sz = np.array([m["z"] for m in muestras], dtype=float)
 
     for t in ternas:
-        if t["esfera"] is None:
-            continue
         n = subdivisiones or _subdivisiones_terna(t["puntas"])
         vertices, triangulos = _malla_parche(t["puntas"], t["esfera"]["centro"], radio, n)
         t.update(n=n, vertices=vertices, triangulos=triangulos)
@@ -626,17 +1127,22 @@ def _construir_superficies(
         elif _toca_cubierta_parche(t, sx, sy, sz, TOL_Z):
             _descartar(t, MOTIVO_TOCA_CUBIERTA)
 
+    _agregar_diagnostico(ternas, masts, radio, sx, sy)
+
     uniones = _construir_uniones(ternas, todas, radio, regiones)
-    return ternas, uniones
+    cota_max = float(sz.max()) if sz.size else 0.0
+    faldas, info = _construir_faldas(ternas, todas, radio, regiones, cota_max)
+    return ternas, uniones, faldas, info
 
 
 def _resultado_superficies(
     ternas: List[Dict[str, Any]],
     uniones: List[Dict[str, Any]],
+    faldas: List[Dict[str, Any]],
     radio: float,
     generar_mallas: bool,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Serializa parches y uniones válidos y las piezas descartadas."""
+    """Serializa parches, uniones y faldas válidos y las piezas descartadas."""
     superficies: List[Dict[str, Any]] = []
     sin_esfera: List[Dict[str, Any]] = []
     uniones_sin_superficie: List[Dict[str, Any]] = []
@@ -685,7 +1191,7 @@ def _resultado_superficies(
         if not u["valida"]:
             uniones_sin_superficie.append({
                 "id": u["id"],
-                "tipo": "union_sin_superficie",
+                "tipo": TIPO_UNION_SIN,
                 "mastiles_ids": u["mastiles_ids"],
                 "ternas_ids": u["ternas_ids"],
                 "arista": arista,
@@ -719,6 +1225,42 @@ def _resultado_superficies(
         if generar_mallas:
             item["vertices"] = np.round(u["vertices"], 4).tolist()
             item["triangulos"] = u["triangulos"]
+        superficies.append(item)
+
+    for f in faldas:
+        puntas = [_r3(p) for p in f["puntas"]]
+        if not f["valida"]:
+            uniones_sin_superficie.append({
+                "id": f["id"],
+                "tipo": TIPO_FALDA_SIN,
+                "mastiles_ids": f["mastiles_ids"],
+                "ternas_ids": f["ternas_ids"],
+                "arista": puntas,
+                "motivo": f["motivo"],
+                "mensaje": MENSAJES_MOTIVO.get(f["motivo"], "falda no válida"),
+                "radio_esfera": radio,
+            })
+            continue
+
+        item = {
+            "id": f["id"],
+            "tipo": f["tipo"],
+            "mastiles_ids": f["mastiles_ids"],
+            "ternas_ids": f["ternas_ids"],
+            "puntas": puntas,
+            "centro_esfera": _r3(f["centro_circulo"]),
+            "radio": radio,
+            "radio_circunscrito": round(float(f["radio_circulo"]), 3),
+            "altura_centro_sobre_plano": 0.0,
+            "forma": f["forma"],
+            "arista": puntas,
+            "centros_esfera": np.round(f["centros"], 3).tolist(),
+            "vertices": [],
+            "triangulos": [],
+        }
+        if generar_mallas:
+            item["vertices"] = np.round(f["vertices"], 4).tolist()
+            item["triangulos"] = f["triangulos"]
         superficies.append(item)
 
     return superficies, sin_esfera, uniones_sin_superficie
@@ -801,16 +1343,21 @@ def _muestrear_cubierta(
 
 
 def _evaluar_muestras(
-    muestras: List[Dict[str, Any]], ternas: List[Dict[str, Any]], radio: float
+    muestras: List[Dict[str, Any]],
+    ternas: List[Dict[str, Any]],
+    faldas: List[Dict[str, Any]],
+    radio: float,
 ) -> List[Tuple[bool, Optional[str], Optional[str]]]:
     """Para cada celda: (protegida, motivo_si_no, id_de_la_superficie).
 
     - Celda dentro de una terna con superficie: queda protegida si la cubierta
       está por debajo de esa superficie (esfera de la terna + filetes de sus
       aristas); si no, `sobre_la_esfera`.
+    - Celda dentro de la huella de una falda o casquete válido: queda protegida
+      si la cubierta está por debajo de esa superficie.
     - Celda dentro de una terna descartada: el motivo de esa terna
-      (radio, alineados, no apoyable, toca suelo, toca cubierta).
-    - Celda fuera de toda terna: `fuera_de_triangulacion`.
+      (muy separados, toca suelo, toca cubierta...).
+    - Celda fuera de toda terna y falda: `fuera_de_triangulacion`.
     """
     total = len(muestras)
     if total == 0:
@@ -845,6 +1392,19 @@ def _evaluar_muestras(
             protegida[i] = True
             superficie[i] = t["id"]
 
+    for f in faldas:
+        if not f["valida"]:
+            continue
+        idx = np.nonzero(shapely.intersects_xy(f["region"], sx, sy))[0]
+        if idx.size == 0:
+            continue
+        dentro_valida[idx] = True
+        z = _altura_desde_centros(sx[idx], sy[idx], f["centros"], radio)
+        ok = np.isfinite(z) & (sz[idx] <= z + TOL_Z)
+        for i in idx[ok & ~protegida[idx]]:
+            protegida[i] = True
+            superficie[i] = f["id"]
+
     resultados: List[Tuple[bool, Optional[str], Optional[str]]] = []
     for i in range(total):
         if protegida[i]:
@@ -870,7 +1430,7 @@ def _poligono_a_3d(coords, z_fn) -> List[List[float]]:
 # ============================================================
 
 class SPDAService:
-    """Servicio de evaluación SPDA con parches y uniones independientes."""
+    """Servicio de evaluación SPDA con parches, uniones y faldas independientes."""
 
     @staticmethod
     def generar_superficies_esfera(
@@ -882,13 +1442,15 @@ class SPDAService:
     ) -> Dict[str, Any]:
         """Solo geometría: parches, uniones y piezas descartadas.
 
-        Sin cubierta, solo se controla el contacto con el suelo.
+        Sin cubierta, solo se controla el contacto con el suelo, y no se generan
+        faldas (necesitan la huella del edificio) ni diagnóstico de mástiles
+        separados (necesita celdas de cubierta).
         `forma_superficie` se mantiene por compatibilidad y no se usa.
         """
         radio = float(rolling_sphere_radius)
-        ternas, uniones = _construir_superficies(masts, radio, subdivisiones, [], [])
+        ternas, uniones, faldas, _info = _construir_superficies(masts, radio, subdivisiones, [], [])
         superficies, sin_esfera, uniones_sin = _resultado_superficies(
-            ternas, uniones, radio, generar_mallas
+            ternas, uniones, faldas, radio, generar_mallas
         )
         return {
             "superficies_esfera": superficies,
@@ -907,7 +1469,7 @@ class SPDAService:
         forma_superficie: str = FORMA_PARCHE,
         subdivisiones: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Evalúa la cobertura de la cubierta con parches y uniones independientes.
+        """Evalúa la cobertura de la cubierta con parches, uniones y faldas.
 
         - `poligonos`: polígonos del Modelo2D (cubiertas con sus niveles). Si no
           se pasan, se usa el rectángulo `building_dim` (comportamiento previo).
@@ -920,11 +1482,14 @@ class SPDAService:
         regiones = _regiones_de_cubierta(poligonos, building_dim)
         muestras, paso_usado = _muestrear_cubierta(regiones, paso_malla)
 
-        ternas, uniones = _construir_superficies(masts, radio, subdivisiones, muestras, regiones)
-        superficies, sin_esfera, uniones_sin = _resultado_superficies(
-            ternas, uniones, radio, generar_mallas
+        ternas, uniones, faldas, info_faldas = _construir_superficies(
+            masts, radio, subdivisiones, muestras, regiones
         )
-        resultados = _evaluar_muestras(muestras, ternas, radio)
+        resultados = _evaluar_muestras(muestras, ternas, faldas, radio)
+        ternas = _filtrar_diagnosticos(ternas, muestras, resultados)
+        superficies, sin_esfera, uniones_sin = _resultado_superficies(
+            ternas, uniones, faldas, radio, generar_mallas
+        )
 
         puntos_cobertura: List[Dict[str, Any]] = []
         puntos_desprotegidos: List[Dict[str, Any]] = []
@@ -1040,15 +1605,37 @@ class SPDAService:
             )
             advertencias.append(
                 f"{len(sin_esfera)} terna(s) sin superficie con R = {radio:g} m ({detalle}). "
-                "Reubique los mástiles indicados en 'triangulos_sin_esfera'."
+                "Reubique los mástiles indicados en 'ternas sin esfera posible'."
             )
-        if uniones_sin:
+        uniones_fallidas = [u for u in uniones_sin if u["tipo"] == TIPO_UNION_SIN]
+        faldas_fallidas = [u for u in uniones_sin if u["tipo"] == TIPO_FALDA_SIN]
+        if uniones_fallidas:
             detalle = "; ".join(
                 f"{n} por {ETIQUETAS_MOTIVO.get(mt, mt)}"
-                for mt, n in Counter(u["motivo"] for u in uniones_sin).items()
+                for mt, n in Counter(u["motivo"] for u in uniones_fallidas).items()
             )
             advertencias.append(
-                f"{len(uniones_sin)} unión(es) entre ternas sin superficie ({detalle})."
+                f"{len(uniones_fallidas)} unión(es) entre ternas sin superficie ({detalle})."
+            )
+        if faldas_fallidas:
+            detalle = "; ".join(
+                f"{n} por {ETIQUETAS_MOTIVO.get(mt, mt)}"
+                for mt, n in Counter(u["motivo"] for u in faldas_fallidas).items()
+            )
+            advertencias.append(
+                f"{len(faldas_fallidas)} falda(s) o esquina(s) del borde sin superficie ({detalle}). "
+                "Revise los mástiles del borde y las cubiertas más bajas contiguas."
+            )
+        if info_faldas["edificio_alto"]:
+            advertencias.append(
+                "No se dibuja la falda del edificio: la cubierta llega a "
+                f"{info_faldas['altura_max_cubierta']:.1f} m (más de {ALTURA_MAX_FALDA:g} m) "
+                "y se necesita protección en los laterales."
+            )
+        elif info_faldas["omitidas_punta_alta"]:
+            advertencias.append(
+                f"{info_faldas['omitidas_punta_alta']} arista(s) del borde sin falda: la punta del mástil "
+                f"supera 2R = {2 * radio:g} m y la esfera no puede tocar la punta y el suelo a la vez."
             )
         if masts and porcentaje < 100.0:
             advertencias.append(
@@ -1082,7 +1669,7 @@ class SPDAService:
         - zonas_protegidas: prismas cubiertos al 100 %.
         - zonas_vulnerables: prismas con alguna parte sin cobertura, con sus
           zonas (polígonos 3D) y el motivo de cada una.
-        - mallas_cobertura: parches, uniones y piezas sin superficie. Por
+        - mallas_cobertura: parches, uniones, faldas y piezas sin superficie. Por
           defecto sin vértices/triángulos (se regeneran con los mástiles y R);
           `incluir_malla=True` los guarda también.
         """
@@ -1123,6 +1710,6 @@ class SPDAService:
         for t in evaluacion.get("triangulos_sin_esfera", []):
             mallas.append({"tipo": "terna_sin_superficie", **{k: v for k, v in t.items() if k != "tipo"}})
         for u in evaluacion.get("uniones_sin_superficie", []):
-            mallas.append({"tipo": "union_sin_superficie", **{k: v for k, v in u.items() if k != "tipo"}})
+            mallas.append({"tipo": u.get("tipo", TIPO_UNION_SIN), **{k: v for k, v in u.items() if k != "tipo"}})
 
         return protegidas, vulnerables, mallas

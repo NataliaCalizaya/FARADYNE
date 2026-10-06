@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Info, MapPin, Box, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import {
+  Info, MapPin, Box, Loader2, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
+} from 'lucide-react';
 
 import { GeometriaViewerMastiles } from '../components/GeometriaViewerMastiles/GeometriaViewerMastiles';
 import { MastilPositioner } from '../components/MastilPositioner/MastilPositioner';
@@ -10,6 +12,83 @@ import { planosApi } from '../api/planos';
 import { mastilesApi } from '../api/mastiles';
 import { modelos3dApi } from '../api/modelos3d';
 import { getMastColor } from '../hooks/utilsMastilVisual';
+
+// ============================================================
+// RESUMEN DE COBERTURA (debajo del visor 3D)
+// ============================================================
+
+const ESTADO_PRISMA = {
+  protegido: { label: 'Protegido', cls: 'text-emerald-600', dot: 'bg-emerald-500' },
+  parcial: { label: 'Parcial', cls: 'text-amber-600', dot: 'bg-amber-500' },
+  desprotegido: { label: 'Desprotegido', cls: 'text-red-600', dot: 'bg-red-500' },
+};
+
+const fmtNum = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+
+const CoberturaResumen = ({ coverageData }) => {
+  const [open, setOpen] = useState(true);
+  const prismas = coverageData?.prismas || [];
+  const advertencias = coverageData?.advertencias || [];
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-md shadow-sm text-xs text-slate-700 min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 font-bold text-slate-800 hover:bg-slate-50 rounded-t-md"
+      >
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-left">
+          <span>R = {fmtNum(coverageData.radio_esfera_rodante_r, 0)} m</span>
+          <span className="text-slate-400 hidden sm:inline">·</span>
+          <span>{fmtNum(coverageData.porcentaje_cobertura, 1)} % cubierto</span>
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-200 px-3 py-2 space-y-3">
+          {prismas.length > 0 && (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-64 overflow-y-auto pr-1">
+              {prismas.map((p) => {
+                const est = ESTADO_PRISMA[p.estado] || {
+                  label: p.estado,
+                  cls: 'text-slate-500',
+                  dot: 'bg-slate-400',
+                };
+                return (
+                  <li key={p.id} className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${est.dot}`} />
+                      <span className="truncate">{p.id}</span>
+                    </span>
+                    <span className={`shrink-0 font-semibold ${est.cls}`}>
+                      {est.label} · {fmtNum(p.porcentaje_cobertura, 0)} %
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {advertencias.length > 0 && (
+            <div className="space-y-1.5">
+              {advertencias.map((a, i) => (
+                <p
+                  key={i}
+                  className="flex gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <span className="min-w-0 break-words">{a}</span>
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /**
  * UbicacionMastiles (HU05 + HU03)
@@ -29,7 +108,8 @@ import { getMastColor } from '../hooks/utilsMastilVisual';
  *     la única fuente de verdad y se le pasa como prop.
  *
  * Vista "2D + 3D": ambos visores se muestran EN PARALELO (uno junto al
- * otro), no apilados verticalmente.
+ * otro), no apilados verticalmente. Debajo del visor 3D se muestra el
+ * resumen de cobertura (porcentaje, estado por cubierta y advertencias).
  */
 export const UbicacionMastiles = ({
   idProyecto,
@@ -60,7 +140,7 @@ export const UbicacionMastiles = ({
   // ── Efectivo idModelo2D (puede venir como prop o resolverse desde idPlano) ──
   const [resolvedModelo2DId, setResolvedModelo2DId] = useState(idModelo2D || null);
   const [coverageLoading, setCoverageLoading] = useState(false);
- const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   // ── Carga inicial ────────────────────────────────────────────────
 
@@ -130,7 +210,6 @@ export const UbicacionMastiles = ({
         }
         throw genErr;
       }
-
     } catch (err) {
       console.warn('[UbicacionMastiles] No se pudo resolver Modelo 3D:', err);
       return null;
@@ -149,19 +228,19 @@ export const UbicacionMastiles = ({
 
   const coverageReq = useRef(0);
 
-   const loadCoverage = useCallback(async () => {
-     if (!idProyecto) return;
-     const id = ++coverageReq.current;
-     setCoverageLoading(true);
-     try {
-       const data = await mastilesApi.getCobertura(idProyecto);
-       if (id === coverageReq.current) setCoverageData(data);
-     } catch (err) {
-       console.warn('[UbicacionMastiles] No se pudo cargar cobertura:', err);
-     } finally {
-       if (id === coverageReq.current) setCoverageLoading(false);
-     }
-   }, [idProyecto]);
+  const loadCoverage = useCallback(async () => {
+    if (!idProyecto) return;
+    const id = ++coverageReq.current;
+    setCoverageLoading(true);
+    try {
+      const data = await mastilesApi.getCobertura(idProyecto);
+      if (id === coverageReq.current) setCoverageData(data);
+    } catch (err) {
+      console.warn('[UbicacionMastiles] No se pudo cargar cobertura:', err);
+    } finally {
+      if (id === coverageReq.current) setCoverageLoading(false);
+    }
+  }, [idProyecto]);
 
   // Inicialización completa
   useEffect(() => {
@@ -196,7 +275,6 @@ export const UbicacionMastiles = ({
           await loadMasts(m3dId);
           await loadCoverage();
         }
-
       } catch (err) {
         if (!cancelled) {
           setError('Error al inicializar la página. Recargue e intente nuevamente.');
@@ -209,7 +287,6 @@ export const UbicacionMastiles = ({
 
     return () => { cancelled = true; };
   }, [resolveModelo2D, resolveModelo3D, loadMasts, loadCoverage]);
-
 
   // ── Handlers de colocación ───────────────────────────────────────
 
@@ -250,7 +327,6 @@ export const UbicacionMastiles = ({
 
       // Actualizar cobertura en segundo plano
       loadCoverage();
-
     } catch (err) {
       console.error('[UbicacionMastiles] Error creando mástil:', err);
       const detail = err?.response?.data?.detail;
@@ -260,7 +336,6 @@ export const UbicacionMastiles = ({
       setSaving(false);
     }
   };
-
 
   // ── Handlers de edición (eliminar / mover / cambiar altura) ──────
 
@@ -313,6 +388,7 @@ export const UbicacionMastiles = ({
   const handleSelectMast = (mast) => {
     setSelectedMastId(mast ? mast.id : null);
   };
+
   const handleConfirmarUbicacion = async () => {
     if (!idProyecto) return onNext?.();
     setConfirming(true);
@@ -322,12 +398,13 @@ export const UbicacionMastiles = ({
       setCoverageData(data);
       onNext?.();
     } catch (err) {
-     const detail = err?.response?.data?.detail;
-     setError(typeof detail === 'string' ? detail : 'No se pudo guardar el resultado de cobertura.');
+      const detail = err?.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'No se pudo guardar el resultado de cobertura.');
     } finally {
-     setConfirming(false);
+      setConfirming(false);
     }
-   };
+  };
+
   // Cancelar con Escape
   useEffect(() => {
     const onKey = (e) => {
@@ -340,7 +417,6 @@ export const UbicacionMastiles = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-
 
   // ── Render ────────────────────────────────────────────────────────
 
@@ -356,7 +432,7 @@ export const UbicacionMastiles = ({
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       {/* ── Título ── */}
-      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900" >
+      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Ubicación de Mástiles Captores
       </h1>
 
@@ -423,7 +499,6 @@ export const UbicacionMastiles = ({
         radio={coverageData?.radio_esfera_rodante_r ?? 30}
         totalMastiles={masts.length}
         porcentajeCobertura={coverageData?.porcentaje_cobertura ?? null}
-        advertencias={coverageData?.advertencias || []}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onRefresh={loadCoverage}
@@ -435,30 +510,34 @@ export const UbicacionMastiles = ({
         altura={mastHeight}
       />
 
-        {/* Selector de vista */}
-        <div className="bg-slate-100 p-1 rounded-md border border-slate-200 flex items-center gap-1 shrink-0">
-          {[
-            { key: 'split', label: '2D + 3D' },
-            { key: '2d', label: 'Solo 2D' },
-            { key: '3d', label: 'Solo 3D' },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setViewMode(key)}
-              className={`px-3 py-1 rounded text-xs font-semibold transition ${
-                viewMode === key ? 'bg-brand-blue text-white shadow' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-            <button type="button" onClick={loadCoverage} disabled={coverageLoading}
-            className="px-3 py-1.5 border border-slate-300 hover:bg-slate-100 rounded text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
-            <RefreshCw className={`w-3.5 h-3.5 ${coverageLoading ? 'animate-spin' : ''}`} />
-            Actualizar cobertura
+      {/* Selector de vista */}
+      <div className="bg-slate-100 p-1 rounded-md border border-slate-200 flex flex-wrap items-center gap-1 shrink-0">
+        {[
+          { key: 'split', label: '2D + 3D' },
+          { key: '2d', label: 'Solo 2D' },
+          { key: '3d', label: 'Solo 3D' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setViewMode(key)}
+            className={`px-3 py-1 rounded text-xs font-semibold transition ${
+              viewMode === key ? 'bg-brand-blue text-white shadow' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            {label}
           </button>
-        </div>
+        ))}
+        <button
+          type="button"
+          onClick={loadCoverage}
+          disabled={coverageLoading}
+          className="px-3 py-1.5 border border-slate-300 hover:bg-slate-100 rounded text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${coverageLoading ? 'animate-spin' : ''}`} />
+          Actualizar cobertura
+        </button>
+      </div>
 
       {/* ── Visores: ocupan el ancho completo para que no se compriman ── */}
       <div>
@@ -470,7 +549,6 @@ export const UbicacionMastiles = ({
               : 'flex flex-col gap-4 min-w-0'
           }
         >
-
           {/* GeometriaViewerMastiles */}
           {(viewMode === 'split' || viewMode === '2d') && (
             <div className="bg-white border border-gray-200 rounded-md shadow-sm p-3 min-w-0">
@@ -516,15 +594,19 @@ export const UbicacionMastiles = ({
             </div>
           )}
 
-          {/* Modelo 3D Viewer */}
+          {/* Modelo 3D Viewer + resumen de cobertura */}
           {(viewMode === 'split' || viewMode === '3d') && idModelo3D && (
-            <div className={viewMode === 'split' ? 'h-[560px] min-w-0' : 'h-[560px]'}>
-              <Modelo3DViewer
-                idModelo3D={idModelo3D}
-                idModelo2D={resolvedModelo2DId}
-                masts={masts}
-                coverageData={coverageData}
-              />
+            <div className="flex flex-col gap-3 min-w-0">
+              <div className="h-[560px] min-w-0">
+                <Modelo3DViewer
+                  idModelo3D={idModelo3D}
+                  idModelo2D={resolvedModelo2DId}
+                  masts={masts}
+                  coverageData={coverageData}
+                />
+              </div>
+
+              {coverageData && <CoberturaResumen coverageData={coverageData} />}
             </div>
           )}
         </div>
@@ -546,10 +628,12 @@ export const UbicacionMastiles = ({
           onCancelPlace={() => setPlacing(false)}
         />
       </div>
+
       <button
         type="button"
-        onClick={handleConfirmarUbicacion}disabled={confirming}
-        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs transition flex items-center justify-center gap-2"
+        onClick={handleConfirmarUbicacion}
+        disabled={confirming}
+        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs transition flex items-center justify-center gap-2 disabled:opacity-60"
       >
         {confirming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Box className="w-4 h-4" />}
         Confirmar Ubicación → Continuar

@@ -6,22 +6,34 @@ import * as THREE from 'three';
  * Convención FARADYNE: el backend envía [x, y, z] con Z = altura.
  * Three.js usa Y como altura, y el visor dibuja (x, z, -y).
  *
- * Se dibuja la mitad inferior de cada esfera y las zonas desprotegidas.
- * Las ternas sin esfera posible NO se dibujan.
+ * Superficies (cada una trae su malla `vertices` + `triangulos`):
+ *   parche    triángulo esférico entre 3 puntas
+ *   union     banda entre dos ternas que comparten arista
+ *   falda     arista exterior prolongada hasta el suelo
+ *   casquete  cierre de esquina entre dos faldas
+ *
+ * Además se dibujan las zonas desprotegidas y las aristas de uniones/faldas
+ * que no se pudieron construir (`uniones_sin_superficie`).
+ * Las ternas sin esfera (`triangulos_sin_esfera`) NO se dibujan.
  */
 
 const COLORS = {
-  superficie: 0x009933, // hemisferio inferior
-  malla: 0xa5f3fc,      // aristas de la malla
-  zona: 0xef4444,       // zona desprotegida
+  parche: 0x009933,
+  union: 0x06b6d4,
+  falda: 0x3b82f6,
+  casquete: 0x8b5cf6,
+  zona: 0xef4444,
   zonaBorde: 0xfca5a5,
+  fallo: 0xf97316, // arista de unión/falda sin superficie
 };
 
 // Orden de dibujo fijo: evita el parpadeo de colores al mover la cámara.
-const ORDER = { superficie: 10, zona: 11 };
+const ORDER = { superficie: 10, zona: 11, fallo: 12 };
 
 const toV3 = (p, lift = 0) => new THREE.Vector3(p[0], p[2] + lift, -p[1]);
 const toArr = (m) => (Array.isArray(m) ? m : [m]);
+
+const colorSuperficie = (tipo) => COLORS[tipo] ?? COLORS.parche;
 
 function overlayMaterial(color, opacity) {
   return new THREE.MeshBasicMaterial({
@@ -36,8 +48,8 @@ function overlayMaterial(color, opacity) {
   });
 }
 
-/** Geometría del hemisferio inferior: del backend, o local si no vino malla. */
-function geometriaHemisferio(sup) {
+/** Geometría de la superficie a partir de la malla del backend. */
+function geometriaSuperficie(sup) {
   if (!sup.vertices?.length || !sup.triangulos?.length) return null;
 
   const pos = new Float32Array(sup.vertices.length * 3);
@@ -54,41 +66,30 @@ function geometriaHemisferio(sup) {
 }
 
 function buildSuperficie(sup) {
-  const geo = geometriaHemisferio(sup);
+  const geo = geometriaSuperficie(sup);
   if (!geo) return null;
 
-  // Asegura normales suaves para que la esfera se vea continua.
-  geo.computeVertexNormals();
-
   const material = new THREE.MeshStandardMaterial({
-    color: COLORS.superficie,
+    color: colorSuperficie(sup.tipo),
     transparent: true,
-    opacity: 0.30,
-
-    // Importante: sin wireframe
-    wireframe: false,
-
-    // Superficie visible desde ambos lados
+    opacity: 0.6,
     side: THREE.DoubleSide,
-
-    // Transparencia
     depthWrite: false,
-
     roughness: 0.4,
     metalness: 0.0,
   });
 
   const mesh = new THREE.Mesh(geo, material);
-
   mesh.name = `superficie_${sup.id}`;
   mesh.renderOrder = ORDER.superficie;
+  mesh.userData = { id: sup.id, tipo: sup.tipo };
 
   const g = new THREE.Group();
   g.name = `superficie_${sup.id}`;
   g.add(mesh);
-
   return g;
 }
+
 function buildZona(zona, lift = 0.08) {
   const contorno = zona.poligono || [];
   const huecos = zona.huecos || [];
@@ -127,6 +128,24 @@ function buildZona(zona, lift = 0.08) {
   return g;
 }
 
+/** Aristas (entre puntas de mástil) de uniones/faldas que no se pudieron construir. */
+function buildFallos(fallos) {
+  const pts = [];
+  fallos.forEach((f) => {
+    const a = f.arista || [];
+    if (a.length >= 2) pts.push(toV3(a[0]), toV3(a[1]));
+  });
+  if (!pts.length) return null;
+
+  const line = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: COLORS.fallo, depthWrite: false, depthTest: false })
+  );
+  line.name = 'fallos_union_falda';
+  line.renderOrder = ORDER.fallo;
+  return line;
+}
+
 /** Construye el grupo three con la cobertura (respuesta de /cobertura/proyecto/{id}). */
 export function buildCoberturaGroup(coverage, { superficies = true, zonas = true } = {}) {
   const root = new THREE.Group();
@@ -144,6 +163,8 @@ export function buildCoberturaGroup(coverage, { superficies = true, zonas = true
       const g = buildZona(z);
       if (g) root.add(g);
     });
+    const fallos = buildFallos(coverage.uniones_sin_superficie || []);
+    if (fallos) root.add(fallos);
     // triangulos_sin_esfera: a propósito no se dibujan.
   }
   return root;
