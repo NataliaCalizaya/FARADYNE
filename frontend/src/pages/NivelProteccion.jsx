@@ -186,7 +186,7 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="w-full space-y-5 px-3">
       <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Nivel de Protección SPDA
       </h1>

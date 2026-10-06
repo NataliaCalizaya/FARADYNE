@@ -127,7 +127,7 @@ export const DatosProyecto = ({ projectData, setProjectData, idProyecto, onProye
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="w-full space-y-5 px-3">
       <h1 className="workflow-title project-data-title text-2xl font-bold font-condensed text-gray-900">
         Datos del Proyecto
       </h1>

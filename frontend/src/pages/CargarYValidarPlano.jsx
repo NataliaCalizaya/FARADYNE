@@ -6,10 +6,11 @@ import {
   CheckCircle2,
   Loader2,
   Edit3,
-  Info,
   X,
-  Check,
   FileUp,
+  Sparkles,
+  RefreshCw,
+  Info,
 } from 'lucide-react';
 import { planosApi } from '../api/planos';
 import { GeometriaViewer } from '../components/GeometriaViewer/GeometriaViewer';
@@ -20,52 +21,6 @@ const formatSize = (bytes) =>
   bytes > 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : `${(bytes / 1024).toFixed(1)} KB`;
-
-/* Indicador de pasos: muestra en qué etapa del paso 2 está la persona. */
-const Stepper = ({ current }) => {
-  const steps = ['Cargar plano', 'Revisar y corregir la geometría'];
-
-  return (
-    <ol className="flex items-center gap-2 text-xs">
-      {steps.map((label, i) => {
-        const done = i < current;
-        const active = i === current;
-
-        return (
-          <li key={label} className="flex items-center gap-2">
-            <span
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold transition-colors ${done
-                  ? 'bg-emerald-500 text-white'
-                  : active
-                    ? 'bg-brand-blue text-white ring-4 ring-blue-100'
-                    : 'bg-gray-200 text-gray-500'
-                }`}
-            >
-              {done ? <Check className="w-3.5 h-3.5" /> : i + 1}
-            </span>
-            <span
-              className={
-                active
-                  ? 'font-semibold text-gray-900'
-                  : done
-                    ? 'text-gray-700'
-                    : 'text-gray-400'
-              }
-            >
-              {label}
-            </span>
-            {i < steps.length - 1 && (
-              <span
-                className={`w-10 h-0.5 rounded transition-colors ${done ? 'bg-emerald-400' : 'bg-gray-200'
-                  }`}
-              />
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  );
-};
 
 export const CargarYValidarPlano = ({
   idProyecto,
@@ -88,6 +43,7 @@ export const CargarYValidarPlano = ({
   );
 
   const hasPlano = !!uploadedData?.id;
+  const isPdf = file && /\.pdf$/i.test(file.name);
 
   const selectFile = (selected) => {
     if (!selected) return;
@@ -126,6 +82,10 @@ export const CargarYValidarPlano = ({
     try {
       const data = await planosApi.uploadPlano(file, idProyecto);
       setUploadedData(data);
+      // Se limpia la selección para que la tarjeta vuelva al estado
+      // "Plano cargado correctamente" con la opción de reemplazo.
+      setFile(null);
+      if (inputRef.current) inputRef.current.value = '';
       if (onPlanoUploaded) {
         onPlanoUploaded(data);
       }
@@ -146,30 +106,27 @@ export const CargarYValidarPlano = ({
     }
   };
 
-  const isPdf = file && /\.pdf$/i.test(file.name);
-
   return (
     <div className="w-full space-y-5 px-3">
       {/* ---------- Encabezado ---------- */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs text-gray-500 flex items-center gap-1.5 mb-0.5">
-            <Info className="w-3.5 h-3.5" />
-            Paso 2 de 7
-          </p>
-          <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
-            Cargar y Validar Plano
-          </h1>
+      <div>
+        <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
+          Cargar y Validar Plano
+        </h1>
+        <div className="workflow-notice project-data-notice p-3 bg-blue-50/95 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
+          <Info className="w-4 h-4 shrink-0" />
+          <div>
+            <strong>Paso 2 de 7: </strong>
+            Suba su plano y el sistema extraerá automáticamente la geometría.
+          </div>
         </div>
-
-        <Stepper current={hasPlano ? 1 : 0} />
       </div>
 
       {/* ---------- Error ---------- */}
       {error && (
         <div
           role="alert"
-          className="animate-fade-in p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-start gap-2 text-xs"
+          className="animate-fade-in p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-start gap-2.5 text-xs shadow-sm"
         >
           <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -179,15 +136,15 @@ export const CargarYValidarPlano = ({
           <button
             type="button"
             onClick={() => setError(null)}
-            className="text-red-400 hover:text-red-600 transition"
+            className="p-1 rounded-md text-red-400 hover:text-red-600 hover:bg-red-100 transition"
             aria-label="Cerrar mensaje"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* ---------- Zona de carga ---------- */}
+      {/* ---------- Zona de carga (una sola tarjeta compacta) ---------- */}
       <div
         className={`card-hover bg-white border rounded-xl shadow-sm transition-all ${dragging
             ? 'border-brand-blue ring-4 ring-blue-100 bg-blue-50/60'
@@ -200,104 +157,153 @@ export const CargarYValidarPlano = ({
         onDragLeave={() => setDragging(false)}
         onDrop={loading ? undefined : handleDrop}
       >
-        <div
-          className={`flex flex-wrap items-center gap-4 ${hasPlano ? 'p-3' : 'p-5'
-            }`}
-        >
-          <label
-            className={`flex items-center gap-4 flex-1 min-w-[260px] group ${loading ? 'cursor-wait' : 'cursor-pointer'
-              }`}
-          >
-            <div
-              className={`rounded-xl flex items-center justify-center shrink-0 transition ${hasPlano ? 'w-10 h-10' : 'w-14 h-14'
-                } ${file
-                  ? isPdf
+        {/* Input único para todos los estados */}
+        <input
+          id="plano-file-input"
+          ref={inputRef}
+          type="file"
+          accept=".dxf,.pdf"
+          disabled={loading}
+          onChange={(e) => selectFile(e.target.files[0])}
+          className="hidden"
+        />
+
+        <div className="flex flex-wrap items-center gap-4 p-3.5">
+          {file ? (
+            /* Archivo seleccionado */
+            <div className="flex items-center gap-3 flex-1 min-w-[200px]">
+              <div
+                className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isPdf
                     ? 'bg-red-50 text-red-500'
                     : 'bg-blue-50 text-brand-blue'
-                  : 'bg-blue-50 text-brand-blue group-hover:bg-blue-100 group-hover:scale-105'
-                }`}
-            >
-              {file ? (
-                <FileText className="w-6 h-6" />
-              ) : dragging ? (
-                <FileUp className="w-6 h-6 animate-bounce" />
-              ) : (
-                <Upload className="w-6 h-6" />
-              )}
+                  }`}
+              >
+                <FileText className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-gray-800 truncate">
+                  {file.name}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {isPdf ? 'PDF' : 'DXF'} · {formatSize(file.size)}
+                </div>
+              </div>
             </div>
+          ) : (
+            /* Sin archivo seleccionado: click o drop para elegir */
+            <label
+              htmlFor="plano-file-input"
+              className="flex items-center gap-3 flex-1 min-w-[200px] group cursor-pointer"
+            >
+              <div
+                className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition ${dragging
+                    ? 'bg-brand-blue text-white'
+                    : hasPlano
+                      ? 'bg-emerald-50 text-emerald-600 group-hover:bg-blue-50 group-hover:text-brand-blue'
+                      : 'bg-blue-50 text-brand-blue group-hover:bg-blue-100'
+                  }`}
+              >
+                {dragging ? (
+                  <FileUp className="w-5 h-5 animate-bounce" />
+                ) : hasPlano ? (
+                  <>
+                    <CheckCircle2 className="w-5 h-5 group-hover:hidden" />
+                    <Upload className="w-5 h-5 hidden group-hover:block" />
+                  </>
+                ) : (
+                  <Upload className="w-5 h-5" />
+                )}
+              </div>
 
-            <div className="flex-1 min-w-0">
-              <div className="font-semibold text-sm text-gray-800 truncate">
-                {file
-                  ? file.name
-                  : dragging
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-gray-800 truncate group-hover:text-brand-blue transition">
+                  {dragging
                     ? 'Suelte el archivo aquí'
                     : hasPlano
-                      ? 'Cargar otro plano'
-                      : 'Arrastre su plano o haga clic para elegirlo'}
+                      ? 'Plano cargado correctamente'
+                      : 'Arrastre su plano aquí o haga clic para seleccionarlo'}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {hasPlano
+                    ? 'Haga clic aquí si desea reemplazarlo por otro archivo'
+                    : 'Se extraen perímetros y cotas automáticamente'}
+                </div>
               </div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                {file
-                  ? `${isPdf ? 'PDF' : 'DXF'} · ${formatSize(file.size)}`
-                  : 'Formatos admitidos: .DXF y .PDF. Se extraen perímetros y cotas automáticamente.'}
-              </div>
-            </div>
 
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".dxf,.pdf"
-              disabled={loading}
-              onChange={(e) => selectFile(e.target.files[0])}
-              className="hidden"
-            />
-          </label>
-
-          {file && !loading && (
-            <button
-              type="button"
-              onClick={clearFile}
-              className="p-2 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
-              title="Quitar archivo"
-              aria-label="Quitar archivo"
-            >
-              <X className="w-4 h-4" />
-            </button>
+              {/* Chips de formatos */}
+              {!hasPlano && (
+                <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                  <span className="px-2 py-1 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded-full border border-blue-200/60">
+                    .DXF
+                  </span>
+                  <span className="px-2 py-1 bg-red-50 text-red-600 text-[10px] font-semibold rounded-full border border-red-200/60">
+                    .PDF
+                  </span>
+                </div>
+              )}
+            </label>
           )}
 
-          <button
-            type="button"
-            onClick={handleUpload}
-            disabled={!file || loading}
-            className="btn-electric px-5 py-2.5 bg-brand-blue hover:bg-brand-hover text-white font-semibold rounded-lg text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition shadow-sm"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Interpretando trazos...
-              </>
-            ) : (
-              <>
-                <Upload className="w-4 h-4" />
-                {hasPlano ? 'Reemplazar plano' : 'Subir e interpretar'}
-              </>
-            )}
-          </button>
+          {/* Acciones (solo con archivo seleccionado) */}
+          {file && (
+            <div className="flex items-center gap-2">
+              {!loading && (
+                <button
+                  type="button"
+                  onClick={clearFile}
+                  className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
+                  title="Quitar archivo"
+                  aria-label="Quitar archivo"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleUpload}
+                disabled={loading}
+                className="btn-electric px-4 py-2 bg-brand-blue hover:bg-brand-hover text-white font-semibold rounded-lg text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition shadow-md shadow-blue-200/30"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {hasPlano ? 'Procesando…' : 'Interpretando trazos…'}
+                  </>
+                ) : hasPlano ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Reemplazar
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Subir e interpretar
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Barra indeterminada mientras el servidor procesa */}
+        {/* Barra de progreso */}
         {loading && (
           <div className="h-1 bg-blue-100 overflow-hidden rounded-b-xl">
-            <div className="h-full w-1/3 bg-brand-blue rounded animate-pulse" />
+            <div
+              className="h-full bg-gradient-to-r from-brand-blue via-sky-400 to-brand-blue rounded"
+              style={{
+                width: '40%',
+                animation: 'uploadBarSlide 1.6s ease-in-out infinite',
+              }}
+            />
           </div>
         )}
       </div>
 
-      {/* ---------- Corrector 2D ---------- */}
+      {/* ---------- Corrector 2D / Estado vacío ---------- */}
       {hasPlano ? (
         <div className="step-transition space-y-4">
           {uploadedData.nombre_archivo && (
-            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-lg text-xs">
+            <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs shadow-sm">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>
                 Plano <strong>{uploadedData.nombre_archivo}</strong>{' '}
@@ -306,25 +312,26 @@ export const CargarYValidarPlano = ({
               </span>
             </div>
           )}
-
-          <GeometriaViewer
-            idPlano={uploadedData.id}
-            idModelo2D={uploadedData.id_modelo2d}
-            onGeometriaConfirmed={handleConfirmed}
-            onNext={onNext}
-          />
+          <div className="relative left-1/2 -translate-x-1/2 w-[95vw]">
+            <GeometriaViewer
+              idPlano={uploadedData.id}
+              idModelo2D={uploadedData.id_modelo2d}
+              onGeometriaConfirmed={handleConfirmed}
+              onNext={onNext}
+            />
+          </div>
         </div>
       ) : (
-        <div className="bg-slate-50 border-2 border-dashed border-gray-300 rounded-xl min-h-[280px] flex flex-col items-center justify-center p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-white shadow-sm flex items-center justify-center mb-4">
-            <Edit3 className="w-7 h-7 text-gray-400" />
+        <div className="relative left-1/2 -translate-x-1/2 w-[95vw] bg-gradient-to-br from-slate-50 to-white border-2 border-dashed border-gray-200 rounded-2xl min-h-[240px] flex flex-col items-center justify-center p-10 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-gray-100 to-white shadow-sm flex items-center justify-center mb-4">
+            <Edit3 className="w-7 h-7 text-gray-350" style={{ color: '#a3aebf' }} />
           </div>
-          <h3 className="font-semibold text-sm text-gray-700">
-            Todavía no hay un plano cargado
+          <h3 className="font-condensed font-semibold text-base text-gray-600">
+            El corrector de geometría aparecerá aquí
           </h3>
-          <p className="text-xs text-gray-500 max-w-md mt-1.5 leading-relaxed">
-            Cuando suba un archivo .DXF o .PDF, aquí aparecerá el corrector
-            2D con los perímetros y cotas detectados, listo para editar.
+          <p className="text-xs text-gray-400 max-w-sm mt-2 leading-relaxed">
+            Cuando suba un archivo .DXF o .PDF, se mostrarán los perímetros y
+            cotas detectados listos para revisar y editar.
           </p>
         </div>
       )}

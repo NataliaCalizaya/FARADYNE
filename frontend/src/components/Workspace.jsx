@@ -15,6 +15,10 @@ import { proyectosApi } from '../api/proyectos';
 // Slug ↔ índice de paso (debe coincidir con el orden de StepperBar.STEPS)
 const STEP_SLUGS = ['datos', 'plano', 'modelo3d', 'nivel', 'mastiles', 'materiales', 'memoria'];
 
+// Pasos que ocupan casi todo el ancho de la pantalla (índices base 0):
+// 1 = plano (paso 2), 2 = modelo3d (paso 3), 4 = mastiles (paso 5)
+const WIDE_STEPS = [1, 2, 4];
+
 export function Workspace({ onLogout }) {
   const { idParam, paso } = useParams(); // /proyecto/:idParam/:paso
   const navigate = useNavigate();
@@ -37,6 +41,9 @@ export function Workspace({ onLogout }) {
 
   // Índice actual derivado del slug en la URL
   const currentStep = Math.max(0, STEP_SLUGS.indexOf(paso));
+
+  // ¿Este paso necesita ancho ampliado?
+  const isWideStep = WIDE_STEPS.includes(currentStep);
 
   // Navega al paso i — si todavía estamos en /nuevo usa el UUID real cuando ya lo tenemos
   const setCurrentStep = useCallback((i) => {
@@ -172,8 +179,16 @@ export function Workspace({ onLogout }) {
         isGeometriaValidada={isGeometriaValidada}
       />
 
-      {/* Page Content Viewport */}
-      <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto overflow-hidden">
+      {/* Page Content Viewport
+          - Pasos anchos (2, 3 y 5): 95% del ancho, sin tope ni recorte.
+          - Resto de pasos: ancho cómodo (max-w-7xl) como antes. */}
+      <main
+        className={`flex-1 p-4 md:p-6 mx-auto ${
+          isWideStep
+            ? 'w-[95%] max-w-none'
+            : 'w-full max-w-7xl overflow-hidden'
+        }`}
+      >
         <div key={currentStep} className="step-transition">
           {currentStep === 0 && (
             <DatosProyecto
@@ -222,7 +237,7 @@ export function Workspace({ onLogout }) {
             <ListadoMateriales onNext={() => setCurrentStep(6)} />
           )}
           {currentStep === 6 && (
-            <MemoriaDescriptiva projectData={projectData} />
+            <MemoriaDescriptiva projectData={projectData} idProyecto={idProyecto} />
           )}
         </div>
       </main>

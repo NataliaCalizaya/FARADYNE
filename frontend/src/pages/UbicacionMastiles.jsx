@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Info, MapPin, Box, Loader2, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
+  Info, MapPin, Box, Loader2, AlertTriangle, ChevronDown, ChevronUp,
+  Trash2, Minus, Plus, X, Lightbulb,
 } from 'lucide-react';
 
 import { GeometriaViewerMastiles } from '../components/GeometriaViewerMastiles/GeometriaViewerMastiles';
-import { MastilPositioner } from '../components/MastilPositioner/MastilPositioner';
 import { Modelo3DViewer } from '../components/Modelo3DViewer/Modelo3DViewer';
 import { RecomendacionesMastiles } from '../components/GeometriaViewerMastiles/RecomendacionesMastiles';
 import { ResumenUbicacion } from '../components/GeometriaViewerMastiles/ResumenUbicacion';
@@ -14,8 +14,14 @@ import { modelos3dApi } from '../api/modelos3d';
 import { getMastColor } from '../hooks/utilsMastilVisual';
 
 // ============================================================
-// RESUMEN DE COBERTURA (debajo del visor 3D)
+// CONSTANTES Y HELPERS
 // ============================================================
+
+// Rango y atajos de altura (m). Ajustar si el backend admite otros valores.
+const MIN_H = 0.5;
+const MAX_H = 30;
+const STEP_H = 0.5;
+const PRESETS = [1, 2, 3, 4, 6];
 
 const ESTADO_PRISMA = {
   protegido: { label: 'Protegido', cls: 'text-emerald-600', dot: 'bg-emerald-500' },
@@ -23,93 +29,354 @@ const ESTADO_PRISMA = {
   desprotegido: { label: 'Desprotegido', cls: 'text-red-600', dot: 'bg-red-500' },
 };
 
-const fmtNum = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+const fmtNum = (v, d = 1) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—');
+const sameId = (a, b) => String(a) === String(b);
+const clampH = (v) => Math.min(MAX_H, Math.max(MIN_H, Math.round(v * 100) / 100));
 
-const CoberturaResumen = ({ coverageData }) => {
-  const [open, setOpen] = useState(true);
-  const prismas = coverageData?.prismas || [];
-  const advertencias = coverageData?.advertencias || [];
+// Motivos por los que una terna no admite esfera (códigos del backend).
+const MOTIVOS = {
+  sin_esfera_toca_cubierta: {
+    titulo: 'La esfera toca la cubierta',
+    ayuda: 'Suba la altura de estos mástiles o reubíquelos.',
+  },
+  sin_esfera_radio_insuficiente: {
+    titulo: 'Radio insuficiente',
+    ayuda: 'Están demasiado separados para el radio R: acérquelos.',
+  },
+};
+
+const motivoInfo = (codigo) =>
+  MOTIVOS[codigo] || {
+    titulo: codigo
+      ? String(codigo).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+      : 'Otros motivos',
+    ayuda: null,
+  };
+
+// La forma exacta de cada terna depende del backend: se leen los mástiles que
+// la forman (por id) y se resuelven contra la lista actual.
+const ternaInfo = (t, masts) => {
+  const raw = Array.isArray(t)
+    ? t
+    : t?.mastiles ?? t?.ids_mastiles ?? t?.mastiles_ids ?? t?.ids ?? t?.indices ?? t?.puntas ?? null;
+
+  const items = Array.isArray(raw)
+    ? raw.map((r) => {
+      const id = r && typeof r === 'object' ? (r.id ?? r.id_mastil) : r;
+      const i = masts.findIndex((m) => sameId(m.id, id));
+      return { id, mast: i >= 0 ? masts[i] : null, n: i + 1 };
+    })
+    : [];
+
+  const motivo = t && typeof t === 'object' && !Array.isArray(t)
+    ? (t.motivo ?? t.razon ?? t.mensaje ?? null)
+    : null;
+
+  return { items, motivo };
+};
+
+
+// ============================================================
+// CONTROL DE ALTURA (presets + stepper + valor escrito)
+// ============================================================
+
+const HeightControl = ({ value, onChange }) => {
+  const [text, setText] = useState(String(value));
+
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  const apply = (n) => {
+    const next = clampH(n);
+    if (Math.abs(next - value) > 1e-6) onChange(next);
+    else setText(String(value));
+  };
+
+  const commitText = () => {
+    const n = Number(String(text).replace(',', '.'));
+    if (Number.isFinite(n) && n > 0) apply(n);
+    else setText(String(value));
+  };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-md shadow-sm text-xs text-slate-700 min-w-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 font-bold text-slate-800 hover:bg-slate-50 rounded-t-md"
-      >
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-left">
-          <span>R = {fmtNum(coverageData.radio_esfera_rodante_r, 0)} m</span>
-          <span className="text-slate-400 hidden sm:inline">·</span>
-          <span>{fmtNum(coverageData.porcentaje_cobertura, 1)} % cubierto</span>
-        </span>
-        {open ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
-      </button>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1">
+        {PRESETS.map((p) => {
+          const active = Math.abs(value - p) < 1e-6;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => apply(p)}
+              title={`${p} m`}
+              aria-pressed={active}
+              className={`flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-semibold transition ${active
+                ? 'bg-slate-800 border-slate-800 text-white'
+                : 'bg-white border-gray-300 text-gray-700 hover:border-brand-blue hover:text-brand-blue'
+                }`}
+            >
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: getMastColor(p) }}
+              />
+              {p} m
+            </button>
+          );
+        })}
+      </div>
 
-      {open && (
-        <div className="border-t border-gray-200 px-3 py-2 space-y-3">
-          {prismas.length > 0 && (
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-64 overflow-y-auto pr-1">
-              {prismas.map((p) => {
-                const est = ESTADO_PRISMA[p.estado] || {
-                  label: p.estado,
-                  cls: 'text-slate-500',
-                  dot: 'bg-slate-400',
-                };
-                return (
-                  <li key={p.id} className="flex items-center justify-between gap-2 min-w-0">
-                    <span className="flex items-center gap-1.5 min-w-0">
-                      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${est.dot}`} />
-                      <span className="truncate">{p.id}</span>
-                    </span>
-                    <span className={`shrink-0 font-semibold ${est.cls}`}>
-                      {est.label} · {fmtNum(p.porcentaje_cobertura, 0)} %
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {advertencias.length > 0 && (
-            <div className="space-y-1.5">
-              {advertencias.map((a, i) => (
-                <p
-                  key={i}
-                  className="flex gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"
-                >
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                  <span className="min-w-0 break-words">{a}</span>
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <div className="flex items-center border border-gray-300 rounded-md bg-white overflow-hidden">
+        <button
+          type="button"
+          onClick={() => apply(value - STEP_H)}
+          disabled={value <= MIN_H}
+          className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+          aria-label="Bajar altura"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commitText}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') setText(String(value));
+          }}
+          className="w-12 text-center text-xs font-semibold tabular-nums outline-none py-1"
+          aria-label="Altura en metros"
+        />
+        <span className="text-[11px] text-gray-400 pr-1">m</span>
+        <button
+          type="button"
+          onClick={() => apply(value + STEP_H)}
+          disabled={value >= MAX_H}
+          className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+          aria-label="Subir altura"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 };
 
+
+// ============================================================
+// PANELES INFERIORES
+// ============================================================
+
+const Panel = ({ title, count, children }) => (
+  <section className="bg-white border border-gray-200 rounded-md shadow-sm min-w-0 flex flex-col">
+    <header className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-100">
+      <h3 className="text-[11px] font-bold uppercase text-gray-600">{title}</h3>
+      {count != null && (
+        <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-[10px] font-semibold text-gray-600">
+          {count}
+        </span>
+      )}
+    </header>
+    <div className="p-2 max-h-72 overflow-y-auto text-xs text-slate-700">{children}</div>
+  </section>
+);
+
+const PanelMastiles = ({ masts, selectedMastId, onSelect, onDelete }) => (
+  <Panel title="Mástiles instalados" count={masts.length}>
+    {masts.length === 0 ? (
+      <p className="py-4 text-center text-gray-400">Aún no hay mástiles colocados.</p>
+    ) : (
+      <ul className="space-y-0.5">
+        {masts.map((m, i) => {
+          const selected = sameId(m.id, selectedMastId);
+          return (
+            <li key={m.id ?? i} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onSelect(selected ? null : m)}
+                className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded text-left transition ${selected ? 'bg-fuchsia-50 ring-1 ring-fuchsia-300' : 'hover:bg-gray-50'
+                  }`}
+              >
+                <span
+                  className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center text-[9px] font-bold text-white"
+                  style={{ backgroundColor: getMastColor(m.altura) }}
+                >
+                  {i + 1}
+                </span>
+                <span className="flex-1 min-w-0 truncate tabular-nums text-gray-500">
+                  {fmtNum(m.posicion_x, 2)}, {fmtNum(m.posicion_y, 2)}
+                </span>
+                <span className="shrink-0 font-semibold tabular-nums">{fmtNum(m.altura, 1)} m</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(m.id)}
+                title="Eliminar mástil"
+                aria-label={`Eliminar mástil ${i + 1}`}
+                className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </Panel>
+);
+
+// Mini tarjeta de un mástil dentro de una terna.
+const MastChip = ({ item, onSelect }) => {
+  if (!item.mast) {
+    // Mástil que ya no está en la lista (p. ej. eliminado): cobertura desactualizada.
+    return (
+      <span
+        title="Este mástil ya no está en la lista; actualice la cobertura"
+        className="inline-flex items-center px-1.5 py-1 rounded-md border border-dashed border-gray-300 bg-gray-50 text-[11px] font-semibold text-gray-400 tabular-nums"
+      >
+        {String(item.id)}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect?.(item.mast)}
+      title={`Mástil ${item.n} · ${fmtNum(item.mast.altura, 1)} m`}
+      className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md border border-gray-200 bg-white text-[11px] font-bold text-slate-700 hover:border-brand-blue hover:text-brand-blue transition"
+    >
+      <span
+        className="inline-block w-2 h-2 rounded-full"
+        style={{ backgroundColor: getMastColor(item.mast.altura) }}
+      />
+      #{item.n}
+    </button>
+  );
+};
+
+const PanelTernas = ({ coverageData, masts, onSelect }) => {
+  const ternas = coverageData?.triangulos_sin_esfera || [];
+
+  // Agrupadas por motivo: una columna por cada uno.
+  const grupos = [];
+  ternas.forEach((t, i) => {
+    const info = ternaInfo(t, masts);
+    const key = info.motivo || 'otros';
+    let g = grupos.find((x) => x.key === key);
+    if (!g) {
+      g = { key, ...motivoInfo(info.motivo), ternas: [] };
+      grupos.push(g);
+    }
+    g.ternas.push({ n: i + 1, items: info.items });
+  });
+
+  return (
+    <Panel title="Ternas sin esfera posible" count={coverageData ? ternas.length : null}>
+      {!coverageData ? (
+        <p className="py-4 text-center text-gray-400">Sin datos de cobertura todavía.</p>
+      ) : ternas.length === 0 ? (
+        <p className="py-4 text-center text-emerald-600 font-semibold">
+          Todas las ternas admiten esfera rodante.
+        </p>
+      ) : (
+        <div
+          className="grid gap-3"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}
+        >
+          {grupos.map((g) => (
+            <div key={g.key} className="min-w-0 rounded-md border border-amber-200 bg-amber-50/60">
+              <div className="px-2.5 py-1.5 border-b border-amber-200">
+                <p className="flex items-center justify-between gap-2 font-bold text-amber-800">
+                  <span className="truncate">{g.titulo}</span>
+                  <span className="shrink-0 px-1.5 rounded-full bg-amber-200/70 text-[10px]">
+                    {g.ternas.length}
+                  </span>
+                </p>
+                {g.ayuda && <p className="text-[10px] text-amber-700 mt-0.5">{g.ayuda}</p>}
+              </div>
+
+              <ul className="p-2 space-y-1.5">
+                {g.ternas.map((t) => (
+                  <li key={t.n} className="flex flex-wrap items-center gap-1">
+                    <span className="w-12 shrink-0 text-[10px] font-semibold text-amber-700 uppercase">
+                      Terna {t.n}
+                    </span>
+                    {t.items.map((it, k) => (
+                      <MastChip key={`${t.n}-${k}`} item={it} onSelect={onSelect} />
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+};
+
+const PanelCubiertas = ({ coverageData }) => {
+  const prismas = coverageData?.prismas || [];
+  const advertencias = coverageData?.advertencias || [];
+
+  return (
+    <Panel title="Cobertura por cubierta" count={coverageData ? prismas.length : null}>
+      {!coverageData ? (
+        <p className="py-4 text-center text-gray-400">Sin datos de cobertura todavía.</p>
+      ) : (
+        <div className="space-y-2">
+          {advertencias.map((a, i) => (
+            <p
+              key={i}
+              className="flex gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span className="min-w-0 break-words">{a}</span>
+            </p>
+          ))}
+
+          <ul className="space-y-1">
+            {prismas.map((p) => {
+              const est = ESTADO_PRISMA[p.estado] || {
+                label: p.estado, cls: 'text-slate-500', dot: 'bg-slate-400',
+              };
+              return (
+                <li key={p.id} className="flex items-center justify-between gap-2 min-w-0">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${est.dot}`} />
+                    <span className="truncate">{p.id}</span>
+                  </span>
+                  <span className={`shrink-0 font-semibold ${est.cls}`}>
+                    {est.label} · {fmtNum(p.porcentaje_cobertura, 0)} %
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </Panel>
+  );
+};
+
+
+// ============================================================
+// PÁGINA
+// ============================================================
+
 /**
  * UbicacionMastiles (HU05 + HU03)
  *
- * Flujo:
- *  1. Carga el Modelo 2D validado desde el backend.
- *  2. Muestra GeometriaViewerMastiles (visor 2D solo-lectura, con clic para
- *     colocar mástiles, y arrastre para moverlos).
- *  3. Muestra MastilPositioner (panel lateral: altura del próximo mástil,
- *     leyenda de colores, lista de mástiles y edición del seleccionado).
- *  4. Clic en geometría → modal de confirmación → POST /mastiles → lista
- *     actualizada. Persistencia inmediata: cada alta/baja/edición se guarda
- *     en el momento (no hay un botón de "guardar todo" separado), y queda
- *     asociada al proyecto vía id_proyecto.
- *  5. Modelo3DViewer se re-renderiza automáticamente ante cualquier cambio
- *     de `masts` (alta, baja, mover, cambiar altura), porque ese estado es
- *     la única fuente de verdad y se le pasa como prop.
- *
- * Vista "2D + 3D": ambos visores se muestran EN PARALELO (uno junto al
- * otro), no apilados verticalmente. Debajo del visor 3D se muestra el
- * resumen de cobertura (porcentaje, estado por cubierta y advertencias).
+ * - Barra superior única: colocar mástil + altura. Si hay un mástil
+ *   seleccionado, el mismo control edita SU altura; si no, fija la altura del
+ *   próximo mástil.
+ * - Colocar es directo: un clic en el visor 2D crea el mástil (sin modal) y la
+ *   herramienta sigue activa hasta pulsar Esc o el botón.
+ * - Debajo de los visores: mástiles instalados, ternas sin esfera y cobertura
+ *   por cubierta.
  */
 export const UbicacionMastiles = ({
   idProyecto,
@@ -129,29 +396,24 @@ export const UbicacionMastiles = ({
   const [placing, setPlacing] = useState(false);
   const [mastHeight, setMastHeight] = useState(1.0);
   const [viewMode, setViewMode] = useState('split'); // 'split' | '2d' | '3d'
-  const [saving, setSaving] = useState(false);
-
-  // Mástil actualmente seleccionado (para editar altura / eliminar / mover).
+  const [showRecs, setShowRecs] = useState(false);
   const [selectedMastId, setSelectedMastId] = useState(null);
 
-  // Coordenadas pendientes de confirmación (alta de un mástil nuevo).
-  const [pendingCoords, setPendingCoords] = useState(null);
-
-  // ── Efectivo idModelo2D (puede venir como prop o resolverse desde idPlano) ──
   const [resolvedModelo2DId, setResolvedModelo2DId] = useState(idModelo2D || null);
   const [coverageLoading, setCoverageLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
+  const creatingRef = useRef(false);
+  const heightTimers = useRef({});
+
   // ── Carga inicial ────────────────────────────────────────────────
 
   const resolveModelo2D = useCallback(async () => {
-    // Si idModelo2D ya está disponible como prop, usarlo directamente.
     if (idModelo2D) {
       setResolvedModelo2DId(idModelo2D);
       return idModelo2D;
     }
 
-    // Si viene solo idPlano, obtener el Modelo 2D desde la preview del plano.
     if (idPlano) {
       try {
         const preview = await planosApi.getPlanoPreview(idPlano);
@@ -169,7 +431,6 @@ export const UbicacionMastiles = ({
   }, [idModelo2D, idPlano]);
 
   const resolveModelo3D = useCallback(async (m2dId) => {
-    // Si ya tenemos el id como prop, usarlo.
     if (idModelo3DProp) {
       setIdModelo3D(idModelo3DProp);
       return idModelo3DProp;
@@ -178,12 +439,8 @@ export const UbicacionMastiles = ({
     if (!m2dId) return null;
 
     try {
-      // Intentar obtener el Modelo 3D existente por Modelo 2D.
-      // OJO: el backend devuelve la clave `id_modelo3d` (no `id`), igual que
-      // en el resto de las respuestas (id_modelo2d, id_proyecto, etc.). Si
-      // solo se chequea `.id` acá, nunca se detecta que ya existe un
-      // Modelo3D y se termina regenerando uno nuevo en cada visita a la
-      // página, perdiendo la asociación con los mástiles ya guardados.
+      // El backend devuelve `id_modelo3d` (no `id`): si solo se mirara `.id`
+      // nunca se detectaría el Modelo 3D existente y se regeneraría en cada visita.
       const existing = await modelos3dApi.getModelo3DByModelo2D(m2dId).catch(() => null);
       const existingId = existing?.id_modelo3d || existing?.id || null;
       if (existingId) {
@@ -191,16 +448,13 @@ export const UbicacionMastiles = ({
         return existingId;
       }
 
-      // Si no existe, generarlo.
       try {
         const generated = await modelos3dApi.generateModelo3D({ id_modelo2d: m2dId });
         const id = generated?.id_modelo3d || generated?.id || null;
         setIdModelo3D(id);
         return id;
       } catch (genErr) {
-        // Puede fallar porque, por una carrera (doble llamada, doble
-        // pestaña, etc.), el Modelo3D ya fue creado justo antes. En vez de
-        // perder la referencia, reintentamos obtenerlo en lugar de generar.
+        // Posible carrera (doble llamada): reintentar obtener el existente.
         console.warn('[UbicacionMastiles] Falló generar Modelo3D, reintentando obtener el existente:', genErr);
         const retry = await modelos3dApi.getModelo3DByModelo2D(m2dId).catch(() => null);
         const retryId = retry?.id_modelo3d || retry?.id || null;
@@ -242,7 +496,6 @@ export const UbicacionMastiles = ({
     }
   }, [idProyecto]);
 
-  // Inicialización completa
   useEffect(() => {
     let cancelled = false;
 
@@ -255,8 +508,6 @@ export const UbicacionMastiles = ({
         if (cancelled) return;
 
         if (!m2dId) {
-          // Un 3D ya existente puede consultarse sin abrir el editor 2D.
-          // Para crear o ubicar mástiles, en cambio, el Modelo 2D es obligatorio.
           if (idModelo3DProp) {
             setIdModelo3D(idModelo3DProp);
             await loadMasts(idModelo3DProp);
@@ -286,25 +537,14 @@ export const UbicacionMastiles = ({
     })();
 
     return () => { cancelled = true; };
-  }, [resolveModelo2D, resolveModelo3D, loadMasts, loadCoverage]);
+  }, [resolveModelo2D, resolveModelo3D, loadMasts, loadCoverage, idModelo3DProp]);
 
-  // ── Handlers de colocación ───────────────────────────────────────
+  // ── Colocar: un clic crea el mástil (sin modal) ──────────────────
 
-  /**
-   * Llamado por GeometriaViewerMastiles cuando el usuario hace clic
-   * en la geometría 2D (con placing=true).
-   */
-  const handleMastClick = useCallback((x, y) => {
-    if (!placing) return;
-    setPendingCoords({ x, y });
-    setPlacing(false);
-  }, [placing]);
+  const handleMastClick = useCallback(async (x, y) => {
+    if (!placing || creatingRef.current) return;
 
-  /** Confirmar colocación del mástil y persistir en el backend. */
-  const handleConfirmMast = async () => {
-    if (!pendingCoords) return;
-
-    setSaving(true);
+    creatingRef.current = true;
     setError(null);
 
     try {
@@ -312,38 +552,37 @@ export const UbicacionMastiles = ({
         id_modelo3d: idModelo3D || undefined,
         id_modelo2d: !idModelo3D ? resolvedModelo2DId : undefined,
         id_proyecto: idProyecto,
-        posicion_x: pendingCoords.x,
-        posicion_y: pendingCoords.y,
+        posicion_x: x,
+        posicion_y: y,
         posicion_z: 0,
         altura: mastHeight,
         tipo: 'Franklin',
       });
 
-      // Nueva referencia de array: dispara el re-render automático del
-      // Modelo3DViewer (recibe `masts` como prop) sin ninguna otra acción.
+      // Nueva referencia: el Modelo3DViewer se actualiza solo (recibe `masts`).
       setMasts((prev) => [...prev, newMast]);
-      setPendingCoords(null);
-      setSelectedMastId(newMast?.id ?? null);
-
-      // Actualizar cobertura en segundo plano
       loadCoverage();
     } catch (err) {
       console.error('[UbicacionMastiles] Error creando mástil:', err);
       const detail = err?.response?.data?.detail;
       setError(typeof detail === 'string' ? detail : 'No se pudo guardar el mástil.');
-      setPendingCoords(null);
     } finally {
-      setSaving(false);
+      creatingRef.current = false;
     }
+  }, [placing, idModelo3D, resolvedModelo2DId, idProyecto, mastHeight, loadCoverage]);
+
+  const togglePlacing = () => {
+    setSelectedMastId(null);
+    setPlacing((p) => !p);
   };
 
-  // ── Handlers de edición (eliminar / mover / cambiar altura) ──────
+  // ── Edición: eliminar / mover / cambiar altura ───────────────────
 
   const handleDeleteMast = async (id) => {
     try {
       await mastilesApi.deleteMastil(id);
-      setMasts((prev) => prev.filter((m) => m.id !== id));
-      if (selectedMastId === id) setSelectedMastId(null);
+      setMasts((prev) => prev.filter((m) => !sameId(m.id, id)));
+      if (sameId(selectedMastId, id)) setSelectedMastId(null);
       loadCoverage();
     } catch (err) {
       console.error('[UbicacionMastiles] Error eliminando mástil:', err);
@@ -351,38 +590,45 @@ export const UbicacionMastiles = ({
     }
   };
 
-  /** Arrastre de un mástil ya colocado en el visor 2D: guarda su nueva posición. */
   const handleMoveMast = async (id, x, y) => {
     // Optimista: refleja el movimiento de inmediato en ambos visores.
     setMasts((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, posicion_x: x, posicion_y: y } : m))
+      prev.map((m) => (sameId(m.id, id) ? { ...m, posicion_x: x, posicion_y: y } : m))
     );
 
     try {
-      const updated = await mastilesApi.updateMastil(id, {
-        posicion_x: x,
-        posicion_y: y,
-      });
-      setMasts((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      const updated = await mastilesApi.updateMastil(id, { posicion_x: x, posicion_y: y });
+      setMasts((prev) => prev.map((m) => (sameId(m.id, id) ? { ...m, ...updated } : m)));
       loadCoverage();
     } catch (err) {
       console.error('[UbicacionMastiles] Error moviendo mástil:', err);
       setError('No se pudo guardar la nueva posición del mástil.');
-      // Revertir recargando desde el backend ante un error de guardado.
       if (idModelo3D) loadMasts(idModelo3D);
     }
   };
 
-  /** Cambiar la altura de un mástil ya colocado (desde el panel lateral). */
-  const handleUpdateMastHeight = async (id, altura) => {
-    try {
-      const updated = await mastilesApi.updateMastil(id, { altura });
-      setMasts((prev) => prev.map((m) => (m.id === id ? updated : m)));
-      loadCoverage();
-    } catch (err) {
-      console.error('[UbicacionMastiles] Error actualizando altura:', err);
-      setError('No se pudo actualizar la altura del mástil.');
-    }
+  // La altura se ve al instante; el guardado espera a que el usuario deje de
+  // tocar el control (evita una llamada por cada clic en +/−).
+  const handleUpdateMastHeight = (id, altura) => {
+    setMasts((prev) =>
+      prev.map((m) => (sameId(m.id, id) ? { ...m, altura } : m))
+    );
+
+    clearTimeout(heightTimers.current[id]);
+    heightTimers.current[id] = setTimeout(async () => {
+      delete heightTimers.current[id];
+      try {
+        const updated = await mastilesApi.updateMastil(id, { altura });
+        if (!heightTimers.current[id]) {
+          setMasts((prev) => prev.map((m) => (sameId(m.id, id) ? { ...m, ...updated } : m)));
+        }
+        loadCoverage();
+      } catch (err) {
+        console.error('[UbicacionMastiles] Error actualizando altura:', err);
+        setError('No se pudo actualizar la altura del mástil.');
+        if (idModelo3D) loadMasts(idModelo3D);
+      }
+    }, 350);
   };
 
   const handleSelectMast = (mast) => {
@@ -405,20 +651,32 @@ export const UbicacionMastiles = ({
     }
   };
 
-  // Cancelar con Escape
+  // Esc: termina la colocación y deselecciona
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') {
-        setPlacing(false);
-        setPendingCoords(null);
-        setSelectedMastId(null);
-      }
+      if (e.key !== 'Escape') return;
+      setPlacing(false);
+      setSelectedMastId(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Render ────────────────────────────────────────────────────────
+  // ── Derivados ────────────────────────────────────────────────────
+
+  const selectedIdx = masts.findIndex((m) => sameId(m.id, selectedMastId));
+  const selectedMast = selectedIdx >= 0 ? masts[selectedIdx] : null;
+
+  const heightValue = selectedMast ? Number(selectedMast.altura) || mastHeight : mastHeight;
+
+  const handleHeightChange = (h) => {
+    if (selectedMast) handleUpdateMastHeight(selectedMast.id, h);
+    else setMastHeight(h);
+  };
+
+  const isSplit = viewMode === 'split' && idModelo3D && resolvedModelo2DId;
+
+  // ── Render ───────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -430,71 +688,40 @@ export const UbicacionMastiles = ({
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
-      {/* ── Título ── */}
-      <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
-        Ubicación de Mástiles Captores
-      </h1>
+    <div className="w-full space-y-3">
 
-      {/* ── Descripción del paso ── */}
-      <div className="workflow-notice p-3 bg-blue-50/95 border border-blue-200 text-brand-blue rounded-md flex items-center gap-2 text-xs">
-        <Info className="w-4 h-4 shrink-0" />
-        <div>
-          <strong>Paso 5 (HU05):</strong> Haga clic sobre el visor 2D para colocar mástiles
-          pararrayos. Seleccione la altura en el panel derecho antes de colocar cada mástil.
-          Puede arrastrar un mástil para moverlo, o seleccionarlo en la lista para cambiar su
-          altura o eliminarlo. Los cambios se persisten automáticamente en el proyecto.
-        </div>
+      {/* ── Título + indicación en una sola línea ── */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
+          Ubicación de Mástiles Captores
+        </h1>
+        <p className="flex items-center gap-1.5 text-xs text-brand-blue">
+          <Info className="w-4 h-4 shrink-0" />
+          Elija la altura, pulse «Colocar mástil» y haga clic en el visor 2D.
+          Arrastre un mástil para moverlo o selecciónelo para cambiar su altura.
+        </p>
       </div>
 
       {/* ── Error global ── */}
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-center gap-2 text-xs">
+        <div
+          role="alert"
+          className="p-2.5 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-center gap-2 text-xs"
+        >
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          {error}
+          <span className="flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-100"
+            aria-label="Cerrar mensaje"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
-      {/* ── Modal de confirmación de mástil nuevo ── */}
-      {pendingCoords && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-300 rounded-lg p-5 w-full max-w-xs shadow-2xl space-y-4">
-            <div className="border-b border-gray-100 pb-2">
-              <h3 className="font-condensed font-bold text-sm text-slate-900 uppercase">
-                Confirmar Mástil
-              </h3>
-              <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-1.5">
-                <span
-                  className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: getMastColor(mastHeight) }}
-                />
-                Coordenadas: ({Number(pendingCoords.x).toFixed(2)},{' '}
-                {Number(pendingCoords.y).toFixed(2)}) · Altura: {mastHeight} m · Tipo: Franklin
-              </p>
-            </div>
-
-            <div className="flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setPendingCoords(null)}
-                className="flex-1 py-1.5 border border-red-500 text-red-600 hover:bg-red-50 rounded font-semibold text-xs transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmMast}
-                disabled={saving}
-                className="flex-1 py-1.5 bg-brand-blue hover:bg-brand-hover text-white rounded font-semibold text-xs transition disabled:opacity-60 flex items-center justify-center gap-1"
-              >
-                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                {saving ? 'Guardando...' : 'Colocar Mástil'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* ── Resumen (incluye selector de vista y actualizar cobertura) ── */}
       <ResumenUbicacion
         radio={coverageData?.radio_esfera_rodante_r ?? 30}
         totalMastiles={masts.length}
@@ -505,128 +732,140 @@ export const UbicacionMastiles = ({
         refreshing={coverageLoading}
       />
 
-      <RecomendacionesMastiles
-        radio={coverageData?.radio_esfera_rodante_r ?? 30}
-        altura={mastHeight}
-      />
-
-      {/* Selector de vista */}
-      <div className="bg-slate-100 p-1 rounded-md border border-slate-200 flex flex-wrap items-center gap-1 shrink-0">
-        {[
-          { key: 'split', label: '2D + 3D' },
-          { key: '2d', label: 'Solo 2D' },
-          { key: '3d', label: 'Solo 3D' },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setViewMode(key)}
-            className={`px-3 py-1 rounded text-xs font-semibold transition ${
-              viewMode === key ? 'bg-brand-blue text-white shadow' : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* ── Barra de mástil: colocar + altura (queda fija al hacer scroll) ── */}
+      <div className="sticky top-0 z-30 bg-white border border-gray-200 rounded-md shadow-sm px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <button
           type="button"
-          onClick={loadCoverage}
-          disabled={coverageLoading}
-          className="px-3 py-1.5 border border-slate-300 hover:bg-slate-100 rounded text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+          onClick={togglePlacing}
+          disabled={!resolvedModelo2DId}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded font-bold text-xs transition disabled:opacity-50 ${placing
+            ? 'bg-amber-500 hover:bg-amber-600 text-white'
+            : 'bg-brand-blue hover:bg-brand-hover text-white'
+            }`}
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${coverageLoading ? 'animate-spin' : ''}`} />
-          Actualizar cobertura
+          <MapPin className="w-3.5 h-3.5" />
+          {placing ? 'Terminar (Esc)' : 'Colocar mástil'}
+        </button>
+
+        {/* A quién afecta la altura */}
+        <div className="flex items-center gap-2 text-[11px] text-gray-500 min-w-0">
+          {selectedMast ? (
+            <>
+              <span
+                className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center text-[9px] font-bold text-white"
+                style={{ backgroundColor: getMastColor(selectedMast.altura) }}
+              >
+                {selectedIdx + 1}
+              </span>
+              <span className="font-semibold text-gray-700">Mástil {selectedIdx + 1}</span>
+              <span className="hidden md:inline tabular-nums">
+                ({fmtNum(selectedMast.posicion_x, 2)}, {fmtNum(selectedMast.posicion_y, 2)})
+              </span>
+            </>
+          ) : (
+            <span>{placing ? 'Altura de los mástiles nuevos' : 'Altura del próximo mástil'}</span>
+          )}
+        </div>
+
+        <HeightControl value={heightValue} onChange={handleHeightChange} />
+
+        {selectedMast && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleDeleteMast(selectedMast.id)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-semibold transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Eliminar
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedMastId(null)}
+              className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+              title="Deseleccionar (Esc)"
+              aria-label="Deseleccionar mástil"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setShowRecs((v) => !v)}
+          aria-expanded={showRecs}
+          className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-brand-blue"
+        >
+          <Lightbulb className="w-3.5 h-3.5" />
+          Recomendaciones
+          {showRecs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
       </div>
 
-      {/* ── Visores: ocupan el ancho completo para que no se compriman ── */}
-      <div>
-        {/* split en 2 columnas SOLO si el viewer 3D está disponible */}
-        <div
-          className={
-            viewMode === 'split' && idModelo3D && resolvedModelo2DId
-              ? 'grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0 items-start'
-              : 'flex flex-col gap-4 min-w-0'
-          }
-        >
-          {/* GeometriaViewerMastiles */}
-          {(viewMode === 'split' || viewMode === '2d') && (
-            <div className="bg-white border border-gray-200 rounded-md shadow-sm p-3 min-w-0">
-              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                <span className="text-xs font-bold text-gray-600 uppercase">
-                  Vista 2D — Geometría Validada
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedMastId(null);
-                    setPlacing((p) => !p);
-                  }}
-                  disabled={!resolvedModelo2DId}
-                  className={`flex items-center gap-1.5 px-4 py-1.5 rounded font-bold text-xs transition disabled:opacity-50 ${
-                    placing
-                      ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                      : 'bg-brand-blue hover:bg-brand-hover text-white'
-                  }`}
-                >
-                  <MapPin className="w-3.5 h-3.5" />
-                  {placing ? 'Cancelar (Esc)' : `Colocar Mástil · ${mastHeight} m`}
-                </button>
+      {showRecs && (
+        <RecomendacionesMastiles
+          radio={coverageData?.radio_esfera_rodante_r ?? 30}
+          altura={heightValue}
+        />
+      )}
+
+      {/* ── Visores: ocupan todo el ancho disponible ── */}
+      <div
+        className={
+          isSplit
+            ? 'grid grid-cols-1 lg:grid-cols-2 gap-3 min-w-0 items-start'
+            : 'flex flex-col gap-3 min-w-0'
+        }
+      >
+        {(viewMode === 'split' || viewMode === '2d') && (
+          <div className="bg-white border border-gray-200 rounded-md shadow-sm p-2 min-w-0">
+            <span className="block mb-1 text-[11px] font-bold text-gray-600 uppercase">
+              Vista 2D — Geometría validada
+            </span>
+
+            {resolvedModelo2DId ? (
+              <GeometriaViewerMastiles
+                idModelo2D={resolvedModelo2DId}
+                masts={masts}
+                onMastClick={handleMastClick}
+                onMastMove={handleMoveMast}
+                onSelectMast={handleSelectMast}
+                selectedMastId={selectedMastId}
+                placing={placing}
+                radioEsfera={coverageData?.radio_esfera_rodante_r ?? 30}
+                alturaNuevoMastil={mastHeight}
+              />
+            ) : (
+              <div className="py-10 text-center text-gray-400 text-xs">
+                No se pudo determinar el Modelo 2D.
               </div>
+            )}
+          </div>
+        )}
 
-              {resolvedModelo2DId ? (
-                <GeometriaViewerMastiles
-                  idModelo2D={resolvedModelo2DId}
-                  masts={masts}
-                  onMastClick={handleMastClick}
-                  onMastMove={handleMoveMast}
-                  onSelectMast={handleSelectMast}
-                  selectedMastId={selectedMastId}
-                  placing={placing}
-                  radioEsfera={coverageData?.radio_esfera_rodante_r ?? 30}
-                  alturaNuevoMastil={mastHeight}
-                />
-              ) : (
-                <div className="py-10 text-center text-gray-400 text-xs">
-                  No se pudo determinar el Modelo 2D.
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Modelo 3D Viewer + resumen de cobertura */}
-          {(viewMode === 'split' || viewMode === '3d') && idModelo3D && (
-            <div className="flex flex-col gap-3 min-w-0">
-              <div className="h-[560px] min-w-0">
-                <Modelo3DViewer
-                  idModelo3D={idModelo3D}
-                  idModelo2D={resolvedModelo2DId}
-                  masts={masts}
-                  coverageData={coverageData}
-                />
-              </div>
-
-              {coverageData && <CoberturaResumen coverageData={coverageData} />}
-            </div>
-          )}
-        </div>
+        {(viewMode === 'split' || viewMode === '3d') && idModelo3D && (
+          <div className={`${isSplit ? 'h-full' : 'h-[75vh]'} min-h-[520px] min-w-0`}>
+            <Modelo3DViewer
+              idModelo3D={idModelo3D}
+              idModelo2D={resolvedModelo2DId}
+              masts={masts}
+              coverageData={coverageData}
+            />
+          </div>
+        )}
       </div>
 
-      {/* ── Datos y controles debajo, en dos columnas ── */}
-      <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm">
-        <MastilPositioner
+      {/* ── Debajo de los visores: datos, sin repetir lo del resumen ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
+        <PanelMastiles
           masts={masts}
-          mastHeight={mastHeight}
-          onHeightChange={setMastHeight}
-          onDeleteMast={handleDeleteMast}
-          onSelectMast={handleSelectMast}
           selectedMastId={selectedMastId}
-          onUpdateMastHeight={handleUpdateMastHeight}
-          onDeselectMast={() => setSelectedMastId(null)}
-          coverageData={coverageData}
-          placing={placing}
-          onCancelPlace={() => setPlacing(false)}
+          onSelect={handleSelectMast}
+          onDelete={handleDeleteMast}
         />
+        <PanelTernas coverageData={coverageData} masts={masts} onSelect={handleSelectMast} />
+        <PanelCubiertas coverageData={coverageData} />
       </div>
 
       <button

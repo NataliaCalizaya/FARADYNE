@@ -1,10 +1,28 @@
-import React from 'react';
-import { CheckCircle2, Download, CloudUpload, FileText } from 'lucide-react';
+import React, { useState } from 'react';
+import { CheckCircle2, CloudUpload, Download, Loader2 } from 'lucide-react';
+import { memoriasApi } from '../api/memorias';
 
 // TODO: conectar cuando exista el endpoint de Memoria Descriptiva e historial de versiones
-export const MemoriaDescriptiva = ({ projectData }) => {
+export const MemoriaDescriptiva = ({ projectData, idProyecto }) => {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+
+  const generarYDescargar = async () => {
+    if (!idProyecto) return;
+    setGenerating(true); setError(null);
+    try {
+      await memoriasApi.generar(idProyecto, { declaracion_decreto_351_79: true });
+      const pdf = await memoriasApi.descargar(idProyecto);
+      const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url; link.download = `memoria-proyecto-${idProyecto}.pdf`; link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'No se pudo generar la memoria descriptiva.');
+    } finally { setGenerating(false); }
+  };
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="w-full space-y-5 px-3">
       <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
         Memoria Descriptiva & Documento Final
       </h1>
@@ -100,10 +118,12 @@ export const MemoriaDescriptiva = ({ projectData }) => {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={() => alert('Generando informe completo en PDF...')}
-          className="btn-electric flex-1 py-2.5 bg-brand-blue hover:bg-brand-hover text-white font-bold rounded text-xs flex items-center justify-center gap-2 transition"
+          onClick={generarYDescargar}
+          disabled={generating || !idProyecto}
+          className="btn-electric flex-1 py-2.5 bg-brand-blue hover:bg-brand-hover disabled:opacity-60 text-white font-bold rounded text-xs flex items-center justify-center gap-2 transition"
         >
-          <Download className="w-4 h-4" /> Descargar Memoria Descriptiva (PDF)
+          {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          {generating ? 'Generando PDF...' : 'Generar y descargar PDF'}
         </button>
 
         <button
@@ -115,6 +135,7 @@ export const MemoriaDescriptiva = ({ projectData }) => {
           <CloudUpload className="w-4 h-4" /> Guardar Versión en Backend (Deshabilitado)
         </button>
       </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 };

@@ -13,10 +13,10 @@ import {
 import { planosApi } from '../../api/planos';
 import { getMastColor } from '../../hooks/utilsMastilVisual';
 import {
-   GRID_STEPS, DEFAULT_GRID_INDEX,
-   fitTransform, snapPoint, gridStride, gridLineValues,
-   construirCotas, separacionMaxima,
- } from '../../hooks/utilsGrillaMastiles';
+  GRID_STEPS, DEFAULT_GRID_INDEX,
+  fitTransform, snapPoint, gridStride, gridLineValues,
+  construirCotas, separacionMaxima,
+} from '../../hooks/utilsGrillaMastiles';
 import { CotasTemporales } from './CotasTemporales';
 
 // ============================================================
@@ -33,10 +33,16 @@ const COLORS = {
   snapNode: '#f59e0b',
 };
 
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 60;
+const MIN_STAGE_HEIGHT = 480;
+
 
 // ============================================================
 // HELPERS (idénticos a los de GeometriaViewer para consistencia)
 // ============================================================
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 const getPointCoords = (pt) => {
   if (Array.isArray(pt)) return [Number(pt[0]), Number(pt[1])];
@@ -89,6 +95,36 @@ const errorMessage = (err, fallback) => {
   return err?.message || fallback;
 };
 
+// Caja que contiene todo el contenido: el encuadre no depende solo del
+// bounding_box del backend (que puede venir vacío o no coincidir).
+const computeContentBox = (poligonos, niveles, base) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const add = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  };
+
+  (poligonos || []).forEach((p) =>
+    normalizePoints(p.puntos).forEach((pt) => add(pt.x, pt.y))
+  );
+
+  (niveles || []).forEach((l) => {
+    const [x, y] = getLevelPosition(l);
+    add(x, y);
+  });
+
+  if (!Number.isFinite(minX)) return base || null;
+
+  return { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY };
+};
+
 
 // ============================================================
 // COMPONENTE
@@ -100,10 +136,11 @@ export const GeometriaViewerMastiles = ({
   onMastClick = null,
   onMastMove = null,
   onSelectMast = null,
+  onCancelPlacing = null, // opcional: se llama con Esc mientras se está colocando
   selectedMastId = null,
   placing = false,
   radioEsfera = 30,
- alturaNuevoMastil = null,
+  alturaNuevoMastil = null,
   className = '',
 }) => {
 
@@ -116,9 +153,13 @@ export const GeometriaViewerMastiles = ({
   const [boundingBox, setBoundingBox] = useState(null);
 
   // ── Vista ────────────────────────────────────────────────
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [stageDimensions, setStageDimensions] = useState({ width: 900, height: 480 });
+  const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
+  const [isPanning, setIsPanning] = useState(false);
+  const [showPlan, setShowPlan] = useState(true); // líneas de fondo del plano
+  const [stageDimensions, setStageDimensions] = useState({
+    width: 900,
+    height: MIN_STAGE_HEIGHT,
+  });
 
   // ── Grilla e imán ────────────────────────────────────────
   const [showGrid, setShowGrid] = useState(true);
@@ -130,6 +171,7 @@ export const GeometriaViewerMastiles = ({
 
   // La grilla nace en la esquina mínima del modelo: los nodos quedan alineados
   // con el edificio y es fácil ubicar mástiles en filas y columnas simétricas.
+  // Se mantiene sobre el bounding_box del backend para no mover los nodos.
   const gridOrigin = useMemo(
     () => ({ x: boundingBox?.min_x ?? 0, y: boundingBox?.min_y ?? 0 }),
     [boundingBox]
@@ -138,7 +180,7 @@ export const GeometriaViewerMastiles = ({
   const containerRef = useRef(null);
   const isDraggingPan = useRef(false);
   const didPanRef = useRef(false);
-  const panDistanceRef = useRef(false);
+  const panDistanceRef = useRef(0);
   const draggingMastRef = useRef(false);
   const lastPointerPos = useRef({ x: 0, y: 0 });
 
@@ -177,6 +219,7 @@ export const GeometriaViewerMastiles = ({
       setLineas(data.lineas || []);
       setCotasAltura(data.cotas_altura || []);
       setBoundingBox(data.bounding_box || null);
+      setView({ zoom: 1, pan: { x: 0, y: 0 } });
 
     } catch (err) {
       console.error('[GeometriaViewerMastiles] Error cargando Modelo 2D:', err);
@@ -192,19 +235,36 @@ export const GeometriaViewerMastiles = ({
 
 
   // ── Resize ───────────────────────────────────────────────
+  // El contenedor no existe mientras se muestra el loader o el error, por eso
+  // el efecto se vuelve a enganchar cuando cambian `loading` / `error`.
 
   useEffect(() => {
     const updateSize = () => {
-      if (!containerRef.current) return;
-      setStageDimensions({
-        width: containerRef.current.clientWidth || 900,
-        height: 480,
-      });
+      const el = containerRef.current;
+      if (!el) return;
+
+      const width = el.clientWidth || 900;
+      const height = Math.max(MIN_STAGE_HEIGHT, Math.round(window.innerHeight * 0.75));
+
+      setStageDimensions((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height }
+      );
     };
+
     updateSize();
     window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
+
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      observer = new ResizeObserver(updateSize);
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateSize);
+      if (observer) observer.disconnect();
+    };
+  }, [loading, error]);
 
 
   // ── Transformación plano ↔ pantalla ─────────────────────
@@ -213,10 +273,21 @@ export const GeometriaViewerMastiles = ({
   // Y = x del plano) para que un mástil colocado acá quede en el mismo punto
   // real del edificio en todas las vistas (editor 2D y Modelo 3D).
   //
-  // El encuadre (escala y desplazamiento) tiene en cuenta ese intercambio de
-  // ejes, así el modelo queda centrado y entero dentro del visor.
+  // El encuadre se calcula desde el contenido (polígonos y niveles), así el
+  // modelo queda centrado y entero dentro del visor.
 
-  const T = fitTransform(boundingBox, stageDimensions.width, stageDimensions.height, zoom, pan);
+  const fitBox = useMemo(
+    () => computeContentBox(poligonos, cotasAltura, boundingBox),
+    [poligonos, cotasAltura, boundingBox]
+  );
+
+  const T = fitTransform(
+    fitBox,
+    stageDimensions.width,
+    stageDimensions.height,
+    view.zoom,
+    view.pan
+  );
 
   const transformPoint = (x, y) => [
     y * T.scale + T.offsetX,
@@ -226,10 +297,7 @@ export const GeometriaViewerMastiles = ({
   const inverseTransformPoint = (screenX, screenY) => {
     const x = (screenX - T.offsetX) / T.scale;
     const y = (screenY - T.offsetY) / T.scale;
-    return [
-      y,
-      x,
-    ];
+    return [y, x];
   };
 
   const pointerToPlan = (stage) => {
@@ -246,10 +314,45 @@ export const GeometriaViewerMastiles = ({
 
   // ── Zoom y Pan ───────────────────────────────────────────
 
+  // Zoom manteniendo fijo el punto del plano que está bajo `pointer`.
+  const zoomAt = (pointer, factor) => {
+    setView((prev) => {
+      const newZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+      if (newZoom === prev.zoom) return prev;
+
+      const { width, height } = stageDimensions;
+      const before = fitTransform(fitBox, width, height, prev.zoom, prev.pan);
+      const after = fitTransform(fitBox, width, height, newZoom, prev.pan);
+
+      // punto del plano bajo el cursor (ejes intercambiados)
+      const planY = (pointer.x - before.offsetX) / before.scale;
+      const planX = (pointer.y - before.offsetY) / before.scale;
+
+      return {
+        zoom: newZoom,
+        pan: {
+          x: prev.pan.x + (pointer.x - (planY * after.scale + after.offsetX)),
+          y: prev.pan.y + (pointer.y - (planX * after.scale + after.offsetY)),
+        },
+      };
+    });
+  };
+
+  const zoomFromCenter = (factor) =>
+    zoomAt(
+      { x: stageDimensions.width / 2, y: stageDimensions.height / 2 },
+      factor
+    );
+
+  const resetView = () => setView({ zoom: 1, pan: { x: 0, y: 0 } });
+
   const handleWheel = (e) => {
     e.evt.preventDefault();
-    const factor = e.evt.deltaY < 0 ? 1.12 : 0.89;
-    setZoom((z) => Math.max(0.3, Math.min(20, z * factor)));
+
+    const pointer = e.target.getStage()?.getPointerPosition();
+    if (!pointer) return;
+
+    zoomAt(pointer, e.evt.deltaY < 0 ? 1.12 : 1 / 1.12);
   };
 
   const handlePointerDown = (e) => {
@@ -258,22 +361,21 @@ export const GeometriaViewerMastiles = ({
 
     if (e.target === e.target.getStage()) {
       isDraggingPan.current = true;
+      setIsPanning(true);
       lastPointerPos.current = { x: e.evt.clientX, y: e.evt.clientY };
     }
   };
 
   const handlePointerMove = (e) => {
-    // Al colocar con imán: marcar el nodo al que va a ir el mástil.
-   // if (placing && snapEnabled) {
-      if (placing) {
-        const p = pointerToPlan(e.target.getStage());
-        if (p) {
-          //const node = snapPoint(p[0], p[1], gridOrigin, gridStep);
-          const node = snapIfEnabled(p[0], p[1]);
-          setHoverNode((prev) => (
-            prev && prev[0] === node[0] && prev[1] === node[1] ? prev : node
-          ));
-        }
+    // Al colocar: marcar el nodo (o punto) al que va a ir el mástil.
+    if (placing) {
+      const p = pointerToPlan(e.target.getStage());
+      if (p) {
+        const node = snapIfEnabled(p[0], p[1]);
+        setHoverNode((prev) => (
+          prev && prev[0] === node[0] && prev[1] === node[1] ? prev : node
+        ));
+      }
     }
 
     if (!isDraggingPan.current) return;
@@ -288,21 +390,21 @@ export const GeometriaViewerMastiles = ({
       didPanRef.current = true;
     }
 
-    setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+    setView((prev) => ({
+      ...prev,
+      pan: { x: prev.pan.x + dx, y: prev.pan.y + dy },
+    }));
   };
 
   const handlePointerUp = () => {
     isDraggingPan.current = false;
+    setIsPanning(false);
   };
 
   const handlePointerLeave = () => {
     isDraggingPan.current = false;
+    setIsPanning(false);
     setHoverNode(null);
-  };
-
-  const resetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
   };
 
 
@@ -365,6 +467,48 @@ export const GeometriaViewerMastiles = ({
     setDragPoint({ id: mast.id, x, y });
   };
 
+
+  // ── Atajos de teclado ────────────────────────────────────
+  //
+  // Los atajos leen siempre la última versión de las acciones a través de una
+  // ref, así el listener se registra una sola vez.
+  //   F → encajar la vista · L → mostrar/ocultar plano · Esc → cancelar colocación
+
+  const actionsRef = useRef({});
+
+  actionsRef.current = {
+    fit: resetView,
+    plan: () => setShowPlan((v) => !v),
+    cancel: () => {
+      setHoverNode(null);
+      if (placing && onCancelPlacing) onCancelPlacing();
+    },
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === 'Escape') {
+        actionsRef.current.cancel();
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'f': actionsRef.current.fit(); break;
+        case 'l': actionsRef.current.plan(); break;
+        default: break;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+
   // ── Grilla (dibujada en un solo trazo por tipo de línea) ─
 
   const { width: stageW, height: stageH } = stageDimensions;
@@ -409,6 +553,9 @@ export const GeometriaViewerMastiles = ({
     ? construirCotas(origenCotas, masts, { excluirId: dragPoint?.id, dMax: dMaxPar })
     : [];
 
+  const stageCursor = placing ? 'crosshair' : isPanning ? 'grabbing' : 'grab';
+
+
   // ── Render ───────────────────────────────────────────────
 
   if (loading) {
@@ -434,7 +581,7 @@ export const GeometriaViewerMastiles = ({
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
 
-      {/* ── Mini toolbar: grilla + zoom + reset ── */}
+      {/* ── Mini toolbar: grilla + plano + zoom + reset ── */}
       <div className="flex flex-wrap items-center gap-1.5 justify-end">
 
         {/* Indicador de modo colocación */}
@@ -473,6 +620,18 @@ export const GeometriaViewerMastiles = ({
             Imán
           </label>
 
+          <label
+            className="flex items-center gap-1 cursor-pointer select-none"
+            title="Mostrar / ocultar las líneas del plano de fondo (L)"
+          >
+            <input
+              type="checkbox"
+              checked={showPlan}
+              onChange={(e) => setShowPlan(e.target.checked)}
+            />
+            Plano
+          </label>
+
           <div className="flex flex-col items-stretch">
             <input
               type="range"
@@ -498,18 +657,20 @@ export const GeometriaViewerMastiles = ({
 
         <button
           type="button"
-          onClick={() => setZoom((z) => Math.min(20, z * 1.2))}
+          onClick={() => zoomFromCenter(1.2)}
           className="p-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50"
           title="Acercar"
+          aria-label="Acercar"
         >
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
 
         <button
           type="button"
-          onClick={() => setZoom((z) => Math.max(0.3, z * 0.8))}
+          onClick={() => zoomFromCenter(1 / 1.2)}
           className="p-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50"
           title="Alejar"
+          aria-label="Alejar"
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
@@ -518,7 +679,8 @@ export const GeometriaViewerMastiles = ({
           type="button"
           onClick={resetView}
           className="p-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50"
-          title="Restablecer vista (centra el modelo)"
+          title="Restablecer vista y centrar el modelo (F)"
+          aria-label="Restablecer vista"
         >
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
@@ -527,10 +689,9 @@ export const GeometriaViewerMastiles = ({
       {/* ── Canvas ── */}
       <div
         ref={containerRef}
-        className={`relative bg-slate-50 border rounded-md overflow-hidden ${
-          placing ? 'border-amber-400 ring-2 ring-amber-300' : 'border-gray-300'
-        }`}
-        style={{ minHeight: 480 }}
+        className={`relative bg-slate-50 border rounded-md overflow-hidden ${placing ? 'border-amber-400 ring-2 ring-amber-300' : 'border-gray-300'
+          }`}
+        style={{ minHeight: stageDimensions.height }}
       >
         <Stage
           width={stageDimensions.width}
@@ -541,7 +702,7 @@ export const GeometriaViewerMastiles = ({
           onMouseUp={handlePointerUp}
           onMouseLeave={handlePointerLeave}
           onClick={handleStageClick}
-          style={{ cursor: placing ? 'crosshair' : 'grab' }}
+          style={{ cursor: stageCursor }}
         >
           <Layer>
 
@@ -564,7 +725,7 @@ export const GeometriaViewerMastiles = ({
             )}
 
             {/* ── Líneas de fondo: el plano usado para reconocer la geometría ── */}
-            {lineas.map((line, idx) => {
+            {showPlan && lineas.map((line, idx) => {
               const [x1, y1, x2, y2] = getLinePoints(line);
               const [sx1, sy1] = transformPoint(x1, y1);
               const [sx2, sy2] = transformPoint(x2, y2);
@@ -754,7 +915,8 @@ export const GeometriaViewerMastiles = ({
         </span>
         <span className="ml-auto text-[10px] text-gray-400">
           Rueda: zoom · arrastrar fondo: pan · arrastrar mástil: mover
-          {placing ? ' · clic: colocar mástil' : ' · clic en mástil: seleccionar'}
+          {placing ? ' · clic: colocar mástil · Esc: cancelar' : ' · clic en mástil: seleccionar'}
+          {' · F: encajar · L: plano'}
           {showGrid && ` · grilla ${gridStep} × ${gridStep} m, las líneas más gruesas marcan cada 5 m`}
         </span>
       </div>
@@ -764,14 +926,3 @@ export const GeometriaViewerMastiles = ({
 };
 
 export default GeometriaViewerMastiles;
-
-// ============================================================
-// NOTA — cambios necesarios en planos.py / planos.js
-// ============================================================
-//
-// Este componente pide getModelo2DEdicion(idModelo2D, { incluirLineas: true }).
-// El endpoint /modelos2d/{id}/edicion hoy NO devuelve "lineas" a propósito
-// (ver planos.py). Hay que agregarle un parámetro opcional que las incluya
-// solo cuando se pidan explícitamente, para no pesar las llamadas del
-// editor 2D que lo consultan después de cada operación. Ver el mensaje de
-// chat para el diff exacto de planos.py y planos.js.
