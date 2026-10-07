@@ -21,7 +21,7 @@ import { getMastColor } from '../hooks/utilsMastilVisual';
 const MIN_H = 0.5;
 const MAX_H = 30;
 const STEP_H = 0.5;
-const PRESETS = [1, 2, 3, 4, 6];
+const PRESETS = [0.5, 1, 1.5, 2, 2.5];
 
 const ESTADO_PRISMA = {
   protegido: { label: 'Protegido', cls: 'text-emerald-600', dot: 'bg-emerald-500' },
