@@ -234,7 +234,10 @@ export function Workspace({ onLogout }) {
             />
           )}
           {currentStep === 5 && (
-            <ListadoMateriales onNext={() => setCurrentStep(6)} />
+            <ListadoMateriales
+              idProyecto={idProyecto} 
+              idModelo2D={idModelo2D}
+              onNext={() => setCurrentStep(6)} />
           )}
           {currentStep === 6 && (
             <MemoriaDescriptiva projectData={projectData} idProyecto={idProyecto} />
