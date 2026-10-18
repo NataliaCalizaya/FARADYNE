@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
+} from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three-stdlib';
 import {
@@ -8,6 +10,7 @@ import {
 import { modelos3dApi } from '../../api/modelos3d';
 import { getMastColor } from '../../hooks/utilsMastilVisual';
 import { buildCoberturaGroup, disposeGroup } from '../../hooks/coberturaSPDALayer';
+import { crearCamaraOblicua, esVistaOblicua, DIRECCIONES_PERSPECTIVA } from './vistasTecnicas';
 
 /**
  * FARADYNE Model Convention:
@@ -416,12 +419,16 @@ const ToolBtn = ({ onClick, title, children }) => (
 // COMPONENTE PRINCIPAL
 // ============================================================
 
-export const Modelo3DViewer = ({
+export const Modelo3DViewer = forwardRef(({
   idModelo2D,
   idModelo3D,
   masts = EMPTY_MASTS,
   coverageData = null,
-}) => {
+  // ── Modo captura (memoria descriptiva) ──
+  soloLectura = false, // oculta toolbars, paneles, tooltip y ayuda
+  onReady = null,      // modelo + mástiles + cobertura ya dibujados
+  onError = null,      // mensaje si no se pudo cargar el modelo
+}, ref) => {
   const containerRef = useRef(null);
   const mountRef = useRef(null);
   const controlsRef = useRef(null);
@@ -435,6 +442,12 @@ export const Modelo3DViewer = ({
   const selectedIdRef = useRef(null);
   const requestRef = useRef(0);
   const centerOffsetRef = useRef({ x: 0, y: 0 });
+  const rendererRef = useRef(null);
+  const onReadyRef = useRef(onReady);
+  const onErrorRef = useRef(onError);
+  const readyForRef = useRef(0);
+  onReadyRef.current = onReady;
+  onErrorRef.current = onError;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -598,6 +611,89 @@ export const Modelo3DViewer = ({
   }, []);
 
   // ----------------------------------------------------------
+  // API IMPERATIVA (memoria descriptiva)
+  // ----------------------------------------------------------
+
+  useImperativeHandle(ref, () => ({
+    /**
+     * PNG (dataURL) de una vista predefinida:
+     *   - en perspectiva (cámara del visor): 'iso' | 'iso_der' | 'front' | 'top' | 'side'
+     *   - oblicuas de dibujo técnico (cámara ortográfica con corte): 'caballera' | 'militar'
+     * Renderiza y lee el canvas en la MISMA llamada síncrona, por eso no hace
+     * falta preserveDrawingBuffer. Al terminar restaura tamaño y cámara.
+     */
+    capturarVista: (nombre, { width = 1400, height = 900, pixelRatio = 1, cotas = false, grilla = true } = {}) => {
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const scene = sceneRef.current;
+    const oblicua = esVistaOblicua(nombre);
+    const view = viewsRef.current?.[nombre];
+    if (!renderer || !camera || !controls || !scene || (!view && !oblicua)) return null;
+
+    const grupos = groupsRef.current;
+    const prev = {
+      size: renderer.getSize(new THREE.Vector2()),
+      pixelRatio: renderer.getPixelRatio(),
+      aspect: camera.aspect,
+      pos: camera.position.clone(),
+      target: controls.target.clone(),
+      anim: animRef.current,
+      labelsVisible: grupos?.labels.visible,
+      gridVisible: grupos?.grid.visible,
+    };
+
+    try {
+      animRef.current = null;
+
+      // Visibilidad solo para la captura
+      if (grupos) {
+        grupos.labels.visible = cotas;
+        grupos.grid.visible = grilla;
+      }
+
+      renderer.setPixelRatio(pixelRatio);
+      renderer.setSize(width, height, false);
+
+      let camaraRender = camera;
+      if (oblicua) {
+        scene.updateMatrixWorld(true);
+        const box = new THREE.Box3();
+        ['roofs', 'masts'].forEach((n) => {
+          const o = scene.getObjectByName(n);
+          if (o) box.expandByObject(o);
+        });
+        camaraRender = crearCamaraOblicua(nombre, box, width / height);
+        if (!camaraRender) return null;
+      } else {
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        camera.position.copy(view.pos);
+        controls.target.copy(view.target);
+        camera.lookAt(view.target);
+      }
+
+      renderer.render(scene, camaraRender);
+      return renderer.domElement.toDataURL('image/png');
+    } finally {
+      // Restaurar visibilidad
+      if (grupos) {
+        grupos.labels.visible = prev.labelsVisible;
+        grupos.grid.visible = prev.gridVisible;
+      }
+
+      renderer.setPixelRatio(prev.pixelRatio);
+      renderer.setSize(prev.size.x, prev.size.y, false);
+      camera.aspect = prev.aspect;
+      camera.updateProjectionMatrix();
+      camera.position.copy(prev.pos);
+      controls.target.copy(prev.target);
+      animRef.current = prev.anim;
+    }
+  },
+  }), []);
+
+  // ----------------------------------------------------------
   // ESCENA (se reconstruye solo cuando cambia el modelo)
   // ----------------------------------------------------------
 
@@ -636,6 +732,7 @@ export const Modelo3DViewer = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(el.clientWidth, el.clientHeight);
     el.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
 
     // --- Luces ---
     scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
@@ -759,6 +856,14 @@ export const Modelo3DViewer = ({
         target: modelCenter.clone(),
       },
     };
+
+    // Vistas en perspectiva adicionales (p. ej. 'iso_der'), definidas en vistasTecnicas.js.
+    Object.entries(DIRECCIONES_PERSPECTIVA).forEach(([nombre, dir]) => {
+      viewsRef.current[nombre] = {
+        pos: modelCenter.clone().add(new THREE.Vector3(...dir).normalize().multiplyScalar(fitDist)),
+        target: modelCenter.clone(),
+      };
+    });
 
     camera.position.copy(viewsRef.current.iso.pos);
 
@@ -971,6 +1076,7 @@ export const Modelo3DViewer = ({
       disposeObject(grid);
       if (scene.background && scene.background.dispose) scene.background.dispose();
 
+      rendererRef.current = null;
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
@@ -1102,6 +1208,32 @@ export const Modelo3DViewer = ({
   }, [sceneVersion, coverageData, showSuperficies, showZonas]);
 
   // ----------------------------------------------------------
+  // AVISOS AL PADRE (onReady / onError)
+  // ----------------------------------------------------------
+
+  // Va DESPUÉS de los efectos de mástiles y cobertura: en el mismo commit
+  // corren en orden, y los dos frames de margen dejan el canvas ya dibujado.
+  useEffect(() => {
+    if (!sceneVersion) return undefined;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (readyForRef.current === sceneVersion) return;
+        readyForRef.current = sceneVersion;
+        onReadyRef.current?.();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [sceneVersion]);
+
+  useEffect(() => {
+    if (error) onErrorRef.current?.(error);
+  }, [error]);
+
+  // ----------------------------------------------------------
   // RENDER
   // ----------------------------------------------------------
 
@@ -1115,6 +1247,8 @@ export const Modelo3DViewer = ({
         }`}
     >
       {/* Barra superior: vistas y acciones */}
+      {!soloLectura && (
+      <>
       <div
         className={`border-b px-3 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 z-10 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
           }`}
@@ -1127,6 +1261,7 @@ export const Modelo3DViewer = ({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={`text-[11px] mr-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Vista:</span>
           <ToolBtn onClick={() => setView('iso')} title="Vista isométrica">Isométrica</ToolBtn>
+          <ToolBtn onClick={() => setView('iso_der')} title="Vista isométrica desde la esquina posterior derecha">Isométrica der.</ToolBtn>
           <ToolBtn onClick={() => setView('top')} title="Vista desde arriba">Planta</ToolBtn>
           <ToolBtn onClick={() => setView('front')} title="Vista frontal">Frontal</ToolBtn>
           <ToolBtn onClick={() => setView('side')} title="Vista lateral">Lateral</ToolBtn>
@@ -1220,6 +1355,9 @@ export const Modelo3DViewer = ({
         </Chip>
       </div>
 
+      </>
+      )}
+
       {/* Zona 3D */}
       <div className="flex-1 w-full min-h-[300px] relative">
         <div
@@ -1256,7 +1394,7 @@ export const Modelo3DViewer = ({
         )}
 
         {/* Panel de cubiertas */}
-        {regionList.length > 0 && (
+        {!soloLectura && regionList.length > 0 && (
           <div className={`absolute top-2 left-2 z-10 w-52 max-h-[60%] flex flex-col border rounded-md shadow-lg ${darkMode ? 'bg-slate-800/95 border-slate-700' : 'bg-white/95 border-slate-300'
             }`}>
             <button
@@ -1305,7 +1443,7 @@ export const Modelo3DViewer = ({
         )}
 
         {/* Detalle de la cubierta seleccionada */}
-        {selected && (
+        {!soloLectura && selected && (
           <div className={`absolute top-2 right-2 z-10 w-60 border border-amber-500/60 rounded-md shadow-lg text-[11px] ${darkMode ? 'bg-slate-800/95 text-slate-200' : 'bg-white/95 text-slate-800'
             }`}>
             <div className={`flex items-center justify-between px-2.5 py-1.5 border-b ${darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
@@ -1381,7 +1519,7 @@ export const Modelo3DViewer = ({
         )}
 
         {/* Leyenda de alturas */}
-        {colorMode === 'altura' && regionList.length > 0 && !selected && (
+        {!soloLectura && colorMode === 'altura' && regionList.length > 0 && !selected && (
           <div className={`absolute top-2 right-2 z-10 flex items-stretch gap-1.5 border rounded-md px-2 py-1.5 text-[10px] pointer-events-none ${darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-700'
             }`}>
             <div className="w-2.5 h-24 rounded-sm" style={{ background: LEGEND_GRADIENT }} />
@@ -1393,7 +1531,7 @@ export const Modelo3DViewer = ({
         )}
 
         {/* Tooltip al pasar el mouse */}
-        {tooltip && (
+        {!soloLectura && tooltip && (
           <div
             className={`absolute z-20 pointer-events-none border rounded px-2 py-1.5 text-[11px] shadow-lg ${darkMode ? 'bg-slate-900/95 border-slate-600 text-slate-100' : 'bg-white/95 border-slate-300 text-slate-800'
               }`}
@@ -1408,7 +1546,7 @@ export const Modelo3DViewer = ({
         )}
 
         {/* Ayuda de controles */}
-        {showHint && model3dData && !loading && !error && (
+        {!soloLectura && showHint && model3dData && !loading && !error && (
           <div className={`absolute bottom-2 left-2 z-10 flex items-start gap-2 border rounded-md px-2.5 py-1.5 text-[10px] max-w-[85%] ${darkMode ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-300 text-slate-600'
             }`}>
             <p>
@@ -1431,6 +1569,8 @@ export const Modelo3DViewer = ({
       </div>
     </div>
   );
-};
+});
+
+Modelo3DViewer.displayName = 'Modelo3DViewer';
 
 export default Modelo3DViewer;

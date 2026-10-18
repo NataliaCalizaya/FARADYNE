@@ -240,7 +240,12 @@ export function Workspace({ onLogout }) {
               onNext={() => setCurrentStep(6)} />
           )}
           {currentStep === 6 && (
-            <MemoriaDescriptiva projectData={projectData} idProyecto={idProyecto} />
+            <MemoriaDescriptiva
+              projectData={projectData}
+              idProyecto={idProyecto}
+              idModelo2D={idModelo2D}
+              idModelo3D={idModelo3D}
+            />
           )}
         </div>
       </main>
