@@ -1,15 +1,10 @@
-from sqlalchemy import Column, Integer, Float, String
+from sqlalchemy import Column, Integer, Float, String, Index, text
 
 from .base import Base
 
 
 class MaterialCatalogo(Base):
-    """Catálogo de materiales del cómputo de pararrayos.
-
-    `clave` identifica el tipo de material (p. ej. 'mastil_galvanizado').
-    `altura` solo aplica a materiales que varían por altura del mástil; NULL = vale para todas.
-    `descripcion` es una referencia humana; el texto del listado lo arma el servicio.
-    """
+    """... (tu docstring igual) ..."""
 
     __tablename__ = 'material_catalogo'
 
@@ -18,4 +13,11 @@ class MaterialCatalogo(Base):
     altura = Column(Float, nullable=True)
     codigo = Column(String(30), nullable=True)
     descripcion = Column(String(200), nullable=False)
-    unidad = Column(String(10), nullable=False, default='un')
+    unidad = Column(String(10), nullable=False, default='un', server_default='un')
+
+    __table_args__ = (
+        Index('uq_material_clave_altura', 'clave', 'altura',
+              unique=True, postgresql_where=text('altura IS NOT NULL')),
+        Index('uq_material_clave_sin_altura', 'clave',
+              unique=True, postgresql_where=text('altura IS NULL')),
+    )
