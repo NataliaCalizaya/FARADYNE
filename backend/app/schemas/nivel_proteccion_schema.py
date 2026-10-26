@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Dict, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.level_protection_service import FACTORES_PERMITIDOS, es_factor_valido
 
 
 class NivelProteccionCalcularRequest(BaseModel):
@@ -17,6 +19,17 @@ class NivelProteccionCalcularRequest(BaseModel):
     factor_d: float = Field(1.0, description="Tabla E.4 - Localización de la estructura")
     factor_e: float = Field(1.0, description="Tabla E.5 - Topografía")
 
+    @field_validator("factor_a", "factor_b", "factor_c", "factor_d", "factor_e")
+    @classmethod
+    def _factor_debe_estar_en_su_tabla(cls, valor: float, info) -> float:
+        letra = info.field_name[-1]
+        if not es_factor_valido(letra, valor):
+            permitidos = ", ".join(f"{p:g}" for p in FACTORES_PERMITIDOS[letra])
+            raise ValueError(
+                f"Factor {letra.upper()} inválido ({valor:g}). "
+                f"Valores permitidos (Tabla E.{'abcde'.index(letra) + 1}): {permitidos}."
+            )
+        return float(valor)
     class Config:
         # El frontend manda snake_case (id_proyecto, id_zona, nivel_seleccionado),
         # no los alias en camelCase declarados arriba; se acepta cualquiera de

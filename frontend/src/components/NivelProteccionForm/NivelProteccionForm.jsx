@@ -46,13 +46,43 @@ const FACTOR_E_OPTIONS = [
   { value: '1.7', label: 'Montañas > 900 m (E=1.7)' },
 ];
 
-const FACTORES_POR_DEFECTO = {
-  factor_a: '1.0',
-  factor_b: '1.0',
-  factor_c: '1.0',
-  factor_d: '1.0',
-  factor_e: '1.0',
+const FACTORES_VACIOS = {
+  factor_a: '',
+  factor_b: '',
+  factor_c: '',
+  factor_d: '',
+  factor_e: '',
 };
+
+const FACTORES_CONFIG = [
+  { name: 'factor_a', label: 'Factor A · Ocupación', options: FACTOR_A_OPTIONS },
+  { name: 'factor_b', label: 'Factor B · Construcción', options: FACTOR_B_OPTIONS },
+  { name: 'factor_c', label: 'Factor C · Contenido', options: FACTOR_C_OPTIONS },
+  { name: 'factor_d', label: 'Factor D · Localización', options: FACTOR_D_OPTIONS },
+  { name: 'factor_e', label: 'Factor E · Topografía', options: FACTOR_E_OPTIONS },
+];
+
+const esValorDeTabla = (valor, options) => {
+  const n = parseFloat(valor);
+  return Number.isFinite(n) && options.some((o) => Math.abs(parseFloat(o.value) - n) < 1e-9);
+};
+
+const validarFactores = (factores) => {
+  const errores = {};
+  FACTORES_CONFIG.forEach(({ name, options }) => {
+    const valor = factores[name];
+    if (valor === '' || valor === null || valor === undefined) {
+      errores[name] = 'Seleccione una opción.';
+    } else if (!esValorDeTabla(valor, options)) {
+      errores[name] = 'Valor fuera de la tabla. Seleccione una de las opciones.';
+    }
+  });
+  return errores;
+};
+
+// Ae y dimensiones a 2 decimales; Nd y Nc a 6 cifras significativas
+const fmt2 = (v) => (v == null || v === '' ? '—' : String(Number(Number(v).toFixed(2))));
+const fmtFrecuencia = (v) => (v == null || v === '' ? '—' : String(Number(Number(v).toPrecision(6))));
 
 // Dibujo simplificado tipo Figura B.1 / B.4 del Anexo B
 const FormulaDrawing = ({ length, width, height, marginLateral }) => {
@@ -104,14 +134,16 @@ const CajaFormula = ({ formulaGenerica, formulaSustituida, resultado, unidad, co
  * vez, el padre pasa FACTORES_POR_DEFECTO.
  */
 export const NivelProteccionForm = ({ idProyecto, onCalculated, initialFactores }) => {
-  const [factores, setFactores] = useState(initialFactores || FACTORES_POR_DEFECTO);
+  const [factores, setFactores] = useState(initialFactores || FACTORES_VACIOS)
   const [resultado, setResultado] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   // true cuando el usuario tocó un factor después del último cálculo:
   // obliga a apretar "Calcular" de nuevo antes de confiar en los pasos mostrados.
   const [factoresDirty, setFactoresDirty] = useState(false);
-
+  const [intentoCalcular, setIntentoCalcular] = useState(false);
+  const errores = validarFactores(factores);
+  const mostrarErrores = intentoCalcular;
   const calcular = useCallback(
     async (valores) => {
       setLoading(true);
@@ -146,6 +178,8 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, initialFactores 
   };
 
   const handleCalcularClick = () => {
+    setIntentoCalcular(true);
+    if (Object.keys(errores).length > 0) return; // no se llama al backend con factores inválidos
     calcular(factores);
   };
 
@@ -156,8 +190,14 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, initialFactores 
   let pasoCriterio = null;
 
   if (resultado) {
-    const { longitud: l, anchura: w, altura: h, margen_lateral, area_equivalente_ae, densidad_ng } = resultado;
-    const { frecuencia_impactos_nd: nd, frecuencia_tolerable_nc: nc } = resultado;
+    const { margen_lateral, densidad_ng } = resultado;
+    const l = fmt2(resultado.longitud);
+    const w = fmt2(resultado.anchura);
+    const h = fmt2(resultado.altura);
+    const area_equivalente_ae = fmt2(resultado.area_equivalente_ae);
+    const nd = fmtFrecuencia(resultado.frecuencia_impactos_nd);
+    const nc = fmtFrecuencia(resultado.frecuencia_tolerable_nc);
+    const hNum = Number(resultado.altura);
     const { a, b, c, d, e } = resultado.factores_riesgo || {};
 
     const esMargenH1 = margen_lateral === 1;
@@ -174,7 +214,9 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, initialFactores 
       resultado: area_equivalente_ae,
       justificacion: esMargenH1
         ? `Se adoptó margen lateral H=1 porque la altura de la estructura (H=${h} m) está en el rango 11m ≤ H ≤ 60m (Anexo G, AEA 92305-11).`
-        : `Se adoptó margen lateral H=3 porque la altura de la estructura (H=${h} m) está en el rango 2m ≤ H ≤ 10m (Anexo G, AEA 92305-11).`,
+        : hNum >= 2 && hNum <= 10
+          ? `Se adoptó margen lateral H=3 porque la altura de la estructura (H=${h} m) está en el rango 2m ≤ H ≤ 10m (Anexo G, AEA 92305-11).`
+          : `La altura de la estructura (H=${h} m) queda fuera de los rangos del Anexo G (2–10 m y 11–60 m); se adoptó margen lateral H=3 por defecto. Verifique el criterio con el responsable del proyecto.`,
     };
 
     pasoNd = {
@@ -215,46 +257,37 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, initialFactores 
         <PasoHeader numero={2} titulo="Factores de Riesgo — Anexo E (IRAM 2184 / AEA 92305-11)" />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">Factor A · Ocupación</label>
-            <select name="factor_a" value={factores.factor_a} onChange={handleChange} className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none">
-              {FACTOR_A_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">Factor B · Construcción</label>
-            <select name="factor_b" value={factores.factor_b} onChange={handleChange} className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none">
-              {FACTOR_B_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">Factor C · Contenido</label>
-            <select name="factor_c" value={factores.factor_c} onChange={handleChange} className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none">
-              {FACTOR_C_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">Factor D · Localización</label>
-            <select name="factor_d" value={factores.factor_d} onChange={handleChange} className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none">
-              {FACTOR_D_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">Factor E · Topografía</label>
-            <select name="factor_e" value={factores.factor_e} onChange={handleChange} className="w-full p-2 border border-gray-300 rounded text-xs focus:border-brand-blue focus:outline-none">
-              {FACTOR_E_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
+          {FACTORES_CONFIG.map(({ name, label, options }) => {
+            const msg = mostrarErrores ? errores[name] : null;
+            return (
+              <div key={name}>
+                <label htmlFor={name} className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                  {label} <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id={name}
+                  name={name}
+                  value={factores[name]}
+                  onChange={handleChange}
+                  aria-invalid={Boolean(msg)}
+                  aria-describedby={msg ? `${name}-error` : undefined}
+                  className={`w-full p-2 border rounded text-xs focus:outline-none ${
+                    msg ? 'border-red-400 bg-red-50 focus:border-red-500' : 'border-gray-300 focus:border-brand-blue'
+                  }`}
+                >
+                  <option value="" disabled>Seleccione una opción…</option>
+                  {options.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                {msg && (
+                  <p id={`${name}-error`} role="alert" className="mt-1 text-[11px] text-red-600">
+                    {msg}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {factoresDirty && !loading && (
@@ -297,9 +330,9 @@ export const NivelProteccionForm = ({ idProyecto, onCalculated, initialFactores 
                 </div>
               </div>
               <FormulaDrawing
-                length={resultado.longitud}
-                width={resultado.anchura}
-                height={resultado.altura}
+                length={fmt2(resultado.longitud)}
+                width={fmt2(resultado.anchura)}
+                height={fmt2(resultado.altura)}
                 marginLateral={resultado.margen_lateral}
               />
             </div>

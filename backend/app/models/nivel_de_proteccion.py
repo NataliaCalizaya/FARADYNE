@@ -8,7 +8,7 @@ class NivelDeProteccion(Base):
     __tablename__ = 'nivel_de_proteccion'
     __table_args__ = (
         CheckConstraint(
-            "nivel_proteccion IN ('I', 'II', 'III', 'IV')",
+            "nivel_proteccion IN ('I+', 'I', 'II', 'III', 'IV')",
             name='nivel_de_proteccion_nivel_check',
         ),
     )

@@ -16,6 +16,33 @@ formulario (HU04).
 import math
 from typing import Any, Dict, Optional, Tuple
 
+CIFRAS_SIGNIFICATIVAS_FRECUENCIAS = 10
+
+# Valores válidos de cada factor (Tablas E.1 a E.5)
+FACTORES_PERMITIDOS: Dict[str, Tuple[float, ...]] = {
+    "a": (0.3, 0.7, 1.0, 1.2, 1.3, 1.7),
+    "b": (0.2, 0.4, 0.8, 1.0, 1.7, 2.0),
+    "c": (0.3, 0.8, 1.0, 1.3, 1.7),
+    "d": (0.4, 1.0, 2.0),
+    "e": (0.3, 1.0, 1.3, 1.7),
+}
+
+
+def es_factor_valido(letra: str, valor: Any) -> bool:
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(v):
+        return False
+    return any(math.isclose(v, p, abs_tol=1e-9) for p in FACTORES_PERMITIDOS[letra])
+
+
+def redondear_significativas(valor: float, cifras: int = CIFRAS_SIGNIFICATIVAS_FRECUENCIAS) -> float:
+    """Redondea a cifras significativas (no a decimales fijos)."""
+    if valor == 0 or not math.isfinite(valor):
+        return valor
+    return round(valor, cifras - 1 - int(math.floor(math.log10(abs(valor)))))
 
 # ---------------------------------------------------------------------------
 # Tabla A.1 — Niveles de protección, radios de esfera rodante y corrientes
@@ -84,30 +111,31 @@ def formula_ae_por_margen(margin_lateral: int) -> str:
     return "Ae = L·W + 6H·(L+W) + 9·π·H²  [margen lateral H=3, 2m ≤ H ≤ 10m]"
 
 
+def calculate_ae_exacto(
+    length: float, width: float, height: float, margin_lateral: int = 3
+) -> float:
+    """Ae (m²) sin redondear: es el que debe alimentar a Nd y Nc."""
+    if length <= 0 or width <= 0 or height <= 0:
+        return 0.0
+    area_base = length * width
+    if margin_lateral == 1:
+        return area_base + 2.0 * height * (length + width) + math.pi * (height ** 2)
+    return area_base + 6.0 * height * (length + width) + 9.0 * math.pi * (height ** 2)
+
+
 def calculate_equivalent_collection_area_ae(
     length: float, width: float, height: float, margin_lateral: int = 3
 ) -> Tuple[float, str]:
-    """Calcula el área colectora equivalente Ae (m²) y devuelve también el
-    texto de la fórmula aplicada, para trazabilidad frente al usuario.
-
-    margin_lateral = 3 -> Ae = L·W + 6H(L+W) + 9·π·H²   (Fig. B.1, alturas 2-10 m)
-    margin_lateral = 1 -> Ae = L·W + 2H(L+W) + π·H²      (Fig. B.4, alturas 11-60 m)
-    """
-    if length <= 0 or width <= 0 or height <= 0:
+    """Ae redondeado a 2 decimales SOLO para informarlo, más el texto de la fórmula."""
+    ae = calculate_ae_exacto(length, width, height, margin_lateral)
+    if ae == 0.0:
         return 0.0, ""
-
-    area_base = length * width
-    if margin_lateral == 1:
-        ae = area_base + 2.0 * height * (length + width) + math.pi * (height ** 2)
-    else:
-        ae = area_base + 6.0 * height * (length + width) + 9.0 * math.pi * (height ** 2)
-
     return round(ae, 2), formula_ae_por_margen(margin_lateral)
 
 
 def calculate_direct_strikes_nd(density_ng: float, area_ae: float) -> float:
     """Nd = Ng * Ae * 10^-6  (descargas directas/año) — Anexo D."""
-    return round(density_ng * area_ae * 1e-6, 8)
+    return density_ng * area_ae * 1e-6
 
 
 def calculate_tolerable_frequency_nc(
@@ -119,7 +147,7 @@ def calculate_tolerable_frequency_nc(
     factor_e: float,
 ) -> float:
     """Nc = (A · B · C · D · E) · Nd — Anexo E."""
-    return round(factor_a * factor_b * factor_c * factor_d * factor_e * nd, 8)
+    return factor_a * factor_b * factor_c * factor_d * factor_e * nd
 
 
 def determine_nivel_recomendado(nd: float, nc: float) -> Dict[str, Any]:
@@ -138,7 +166,7 @@ def determine_nivel_recomendado(nd: float, nc: float) -> Dict[str, Any]:
             "nivel_recomendado": "IV",
             "eficiencia_e": None,
             "justificacion": (
-                f"Nd ({nd}) ≤ Nc ({nc}): según el inciso F.1 la estructura no "
+                f"Nd ({nd:.6g}) ≤ Nc ({nc:.6g}): según el inciso F.1 la estructura no "
                 "requiere SPCR obligatorio. Cualquier nivel de protección es "
                 "suficiente; se informa Nivel IV como referencia mínima."
             ),
@@ -162,7 +190,7 @@ def determine_nivel_recomendado(nd: float, nc: float) -> Dict[str, Any]:
         "nivel_recomendado": nivel,
         "eficiencia_e": round(eficiencia, 4),
         "justificacion": (
-            f"Nd ({nd}) > Nc ({nc}): se requiere SPCR. "
+            f"Nd ({nd:.6g}) > Nc ({nc:.6g}): se requiere SPCR. "
             f"E = 1 - (Nc/Nd) = {eficiencia:.4f} → Nivel {nivel} según Tabla F.1."
         ),
     }
@@ -201,14 +229,20 @@ class level_protection_service:
         if margin_lateral is None:
             margin_lateral = determine_margin_lateral(height)
 
-        ae, formula_ae = calculate_equivalent_collection_area_ae(
+        ae_exacto = calculate_ae_exacto(length, width, height, margin_lateral)
+        _, formula_ae = calculate_equivalent_collection_area_ae(
             length, width, height, margin_lateral
         )
-        nd = calculate_direct_strikes_nd(density_ng, ae)
-        nc = calculate_tolerable_frequency_nc(
-            nd, factor_a, factor_b, factor_c, factor_d, factor_e
+        nd_exacto = calculate_direct_strikes_nd(density_ng, ae_exacto)
+        nc_exacto = calculate_tolerable_frequency_nc(
+            nd_exacto, factor_a, factor_b, factor_c, factor_d, factor_e
         )
-        recomendacion = determine_nivel_recomendado(nd, nc)
+        # F.1 se evalúa con los valores sin redondear
+        recomendacion = determine_nivel_recomendado(nd_exacto, nc_exacto)
+
+        ae = round(ae_exacto, 2)
+        nd = redondear_significativas(nd_exacto)
+        nc = redondear_significativas(nc_exacto)
 
         nivel_recomendado = recomendacion["nivel_recomendado"]
         datos_nivel = NIVELES_TABLA_A1.get(nivel_recomendado, NIVELES_TABLA_A1["IV"])

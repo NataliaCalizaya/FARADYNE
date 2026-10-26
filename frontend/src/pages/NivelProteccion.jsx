@@ -14,6 +14,7 @@ const FACTORES_POR_DEFECTO = {
 
 // Encabezado numerado, igual al usado dentro de NivelProteccionForm, para que
 // los 7 pasos del cálculo se vean como una única secuencia visual.
+const fmt2 = (v) => (v == null ? null : String(Number(Number(v).toFixed(2))));
 const PasoHeader = ({ numero, titulo, colorClass = 'bg-brand-blue' }) => (
   <div className="flex items-center gap-2 mb-3">
     <div className={`w-6 h-6 rounded-full ${colorClass} text-white text-[11px] font-bold flex items-center justify-center shrink-0`}>
@@ -78,7 +79,7 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
   //   };
   // }, [idProyecto]);
   useEffect(() => {
-    setInitialFactores(FACTORES_POR_DEFECTO);
+    setInitialFactores({ factor_a: '', factor_b: '', factor_c: '', factor_d: '', factor_e: '' });
     setCargandoExistente(false);
   }, [idProyecto]);
 
@@ -217,15 +218,15 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
           </div>
           <div className="p-2 bg-slate-50 border border-slate-200 rounded">
             <div className="text-[10px] text-gray-500 uppercase">Longitud (L)</div>
-            <div className="text-lg font-bold text-brand-blue">{l != null ? `${l} m` : '—'}</div>
+            <div className="text-lg font-bold text-brand-blue">{l != null ? `${fmt2(l)} m` : '—'}</div>
           </div>
           <div className="p-2 bg-slate-50 border border-slate-200 rounded">
             <div className="text-[10px] text-gray-500 uppercase">Anchura (W)</div>
-            <div className="text-lg font-bold text-brand-blue">{w != null ? `${w} m` : '—'}</div>
+            <div className="text-lg font-bold text-brand-blue">{w != null ? `${fmt2(w)} m` : '—'}</div>
           </div>
           <div className="p-2 bg-slate-50 border border-slate-200 rounded">
             <div className="text-[10px] text-gray-500 uppercase">Altura (H)</div>
-            <div className="text-lg font-bold text-brand-blue">{h != null ? `${h} m` : '—'}</div>
+            <div className="text-lg font-bold text-brand-blue">{h != null ? `${fmt2(h)} m` : '—'}</div>
           </div>
         </div>
       </div>

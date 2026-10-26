@@ -82,7 +82,13 @@ def _obtener_dimensiones_y_ng(
     if not height or height <= 0:
         height = 7.5
 
-    return float(length), float(width), float(height), id_zona, density_ng
+    return (
+        round(float(length), 2),
+        round(float(width), 2),
+        round(float(height), 2),
+        id_zona,
+        density_ng,
+    )
 
 
 def _calcular_riesgo(payload, length, width, height, density_ng) -> Dict[str, Any]:
