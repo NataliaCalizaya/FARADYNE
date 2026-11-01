@@ -124,6 +124,33 @@ const polygonArea = (pts) => {
   return Math.abs(sum) / 2;
 };
 
+// Centroide del polígono (para la etiqueta del nivel de superficie).
+const polygonCentroid = (pts) => {
+  if (!pts.length) {
+    return { x: 0, y: 0 };
+  }
+
+  let area2 = 0;
+  let cx = 0;
+  let cy = 0;
+
+  pts.forEach((a, i) => {
+    const b = pts[(i + 1) % pts.length];
+    const cross = a.x * b.y - b.x * a.y;
+
+    area2 += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  });
+
+  if (Math.abs(area2) < 1e-9) {
+    const sum = pts.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+    return { x: sum.x / pts.length, y: sum.y / pts.length };
+  }
+
+  return { x: cx / (3 * area2), y: cy / (3 * area2) };
+};
+
 const formatMeters = (v) => `${v.toFixed(2)} m`;
 const formatArea = (v) => `${v.toFixed(2)} m²`;
 
@@ -513,6 +540,9 @@ export const GeometriaViewer = ({
   // Diálogo para escribir el valor de un nivel (reemplaza a window.prompt).
   const [levelDialog, setLevelDialog] = useState(null);
 
+  // Texto editable de la cota de superficie del polígono seleccionado.
+  const [surfaceValue, setSurfaceValue] = useState('');
+
 
   // ========================================================
   // COLA DE OPERACIONES
@@ -548,6 +578,15 @@ export const GeometriaViewer = ({
     : null;
 
   const busy = saving || generating;
+
+  // La cota de superficie se edita como texto; se refresca al cambiar de
+  // polígono o cuando el servidor devuelve otro valor.
+  useEffect(() => {
+    const valor = selectedPoly?.nivel_superficie;
+    setSurfaceValue(
+      valor === null || valor === undefined ? '' : formatLevelText(Number(valor))
+    );
+  }, [selectedPolyId, selectedPoly?.nivel_superficie]);
 
 
   // ========================================================
@@ -1310,6 +1349,48 @@ export const GeometriaViewer = ({
 
 
   // ========================================================
+  // NIVEL DE SUPERFICIE (cota en el centro)
+  // ========================================================
+
+  const handleSaveSurfaceLevel = async () => {
+    if (!selectedPoly || !idModelo2D) {
+      return;
+    }
+
+    const valor = parseLevelValue(surfaceValue);
+
+    if (valor === null) {
+      setError('Ingrese una cota válida, por ejemplo +7.50 o -1,20.');
+      return;
+    }
+
+    const { ok } = await runMutation(
+      () => planosApi.setNivelSuperficie(idModelo2D, selectedPoly.id, valor),
+      'No se pudo guardar el nivel de superficie.'
+    );
+
+    if (ok) {
+      setInfo(`Nivel de superficie ${formatLevelText(valor)} guardado.`);
+    }
+  };
+
+  const handleRemoveSurfaceLevel = async () => {
+    if (!selectedPoly || !idModelo2D) {
+      return;
+    }
+
+    const { ok } = await runMutation(
+      () => planosApi.setNivelSuperficie(idModelo2D, selectedPoly.id, null),
+      'No se pudo quitar el nivel de superficie.'
+    );
+
+    if (ok) {
+      setInfo('Nivel de superficie quitado.');
+    }
+  };
+
+
+  // ========================================================
   // ASOCIAR / DESASOCIAR NIVEL ↔ LADO DE SUPERFICIE
   // ========================================================
 
@@ -1628,12 +1709,27 @@ export const GeometriaViewer = ({
     setIsValidated(true);
 
     const sinPendiente = result?.poligonos_sin_pendiente?.length ?? 0;
+    const superficieIncompleta =
+      result?.poligonos_nivel_superficie_incompleto?.length ?? 0;
+
+    const avisos = [];
+
+    if (superficieIncompleta > 0) {
+      avisos.push(
+        `${superficieIncompleta} superficie(s) tienen nivel de superficie pero ` +
+        'les falta el nivel del segundo lado: no se genera techo curvo.'
+      );
+    }
 
     if (sinPendiente > 0) {
-      setInfo(
-        `Geometría confirmada. ${sinPendiente} superficie(s) todavía no tienen ` +
-        'pendiente definida (necesitan dos niveles asociados a lados distintos).'
+      avisos.push(
+        `${sinPendiente} superficie(s) todavía no tienen pendiente definida ` +
+        '(necesitan dos niveles asociados a lados distintos).'
       );
+    }
+
+    if (avisos.length > 0) {
+      setInfo(`Geometría confirmada. ${avisos.join(' ')}`);
     }
   };
 
@@ -1886,17 +1982,71 @@ export const GeometriaViewer = ({
     return '—';
   };
 
-  const slopeDefined = !!selectedPoly?.pendiente?.definida;
+  // Tipo de techo deducido de los niveles (no se guarda en el modelo).
+  const roofInfo = (poly) => {
+    const niveles = (poly?.niveles || []).length;
+    const superficie = poly?.nivel_superficie;
+    const tieneSuperficie =
+      superficie !== null &&
+      superficie !== undefined &&
+      Number.isFinite(Number(superficie));
 
-  const pendienteText = (poly) => {
-    const p = poly?.pendiente;
-
-    if (p?.definida) {
-      return `Pendiente definida · desnivel ${Number(p.desnivel).toFixed(2)} m`;
+    if (tieneSuperficie && niveles === 2) {
+      return {
+        label: 'Parabólico',
+        detalle: `cota de superficie ${formatLevelText(Number(superficie))}`,
+        ok: true,
+      };
     }
 
-    return 'Sin pendiente: faltan dos niveles en lados distintos';
+    if (tieneSuperficie && niveles === 0) {
+      return {
+        label: 'Plano',
+        detalle: `cota ${formatLevelText(Number(superficie))}`,
+        ok: true,
+      };
+    }
+
+    if (tieneSuperficie && niveles === 1) {
+      return {
+        label: 'Incompleto',
+        detalle: 'falta el nivel del segundo lado',
+        ok: false,
+      };
+    }
+
+    if (niveles >= 2) {
+      const desnivel = poly?.pendiente?.desnivel;
+
+      return {
+        label: 'Inclinado',
+        detalle: Number.isFinite(Number(desnivel))
+          ? `desnivel ${Number(desnivel).toFixed(2)} m`
+          : 'dos niveles en lados',
+        ok: true,
+      };
+    }
+
+    if (niveles === 1) {
+      return {
+        label: 'Incompleto',
+        detalle: 'falta el nivel del segundo lado',
+        ok: false,
+      };
+    }
+
+    return {
+      label: 'Sin definir',
+      detalle: 'faltan dos niveles en lados distintos',
+      ok: false,
+    };
   };
+
+  const roofStatus = selectedPoly ? roofInfo(selectedPoly) : null;
+  const roofOk = !!roofStatus?.ok;
+  const hasSurfaceLevel =
+    selectedPoly?.nivel_superficie !== null &&
+    selectedPoly?.nivel_superficie !== undefined;
 
   const withoutSlope = poligonos.filter((p) => !p.pendiente?.definida).length;
   const linkedLevels = cotasAltura.filter(
@@ -2233,17 +2383,20 @@ export const GeometriaViewer = ({
                 </header>
 
                 <div
-                  className={`rounded-md px-2.5 py-1.5 text-[11px] flex items-start gap-1.5 ${slopeDefined
+                  className={`rounded-md px-2.5 py-1.5 text-[11px] flex items-start gap-1.5 ${roofOk
                     ? 'bg-emerald-50 text-emerald-800'
                     : 'bg-amber-50 text-amber-800'
                     }`}
                 >
-                  {slopeDefined ? (
+                  {roofOk ? (
                     <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-px" />
                   ) : (
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
                   )}
-                  {pendienteText(selectedPoly)}
+                  <span>
+                    <strong>{roofStatus?.label}</strong>
+                    {roofStatus?.detalle ? ` · ${roofStatus.detalle}` : ''}
+                  </span>
                 </div>
 
                 {/* Área y perímetro */}
@@ -2281,32 +2434,98 @@ export const GeometriaViewer = ({
                             onClick={() => setSelectedSide(chosen ? null : i)}
                             title={
                               linked
-                                ? `Nivel: ${linkedSides.get(i).join(' / ')}`
+                                ? `Nivel: ${linkedSides.get(i).map((t) => `N${t}`).join(' / ')}`
                                 : `Lado ${i}`
                             }
-                            className={`min-w-[32px] px-1.5 py-1 rounded-md text-[11px] font-semibold transition-all hover:-translate-y-px active:scale-95 ${chosen
+                            className={`w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[11px] font-semibold text-left transition-all hover:-translate-y-px active:scale-95 ${chosen
                                 ? 'bg-amber-500 border-amber-500 text-white shadow-md shadow-amber-300/50'
                                 : linked
                                   ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
                                   : 'bg-white border-gray-300 text-gray-600 hover:bg-blue-50 hover:border-brand-blue/50 hover:text-brand-blue'
                               }`}
                           >
-                            <span className="font-semibold w-6 text-left">L{i}</span>
-                            <span className="tabular-nums flex-1 text-left">
+                            <span className="font-semibold">L{i}</span>
+                            <span className={chosen ? 'text-white/70' : 'text-gray-400'}>·</span>
+                            <span className="tabular-nums">
                               {formatMeters(sideLengths[i])}
                             </span>
                             {linked && (
-                              <span
-                                className={`font-medium truncate ${chosen ? 'text-white' : 'text-emerald-700'}`}
-                              >
-                                {linkedSides.get(i).join(' / ')}
-                              </span>
+                              <>
+                                <span className={chosen ? 'text-white/70' : 'text-gray-400'}>·</span>
+                                <span
+                                  className={`font-medium truncate ${chosen ? 'text-white' : 'text-emerald-700'}`}
+                                >
+                                  {linkedSides.get(i).map((t) => `N${t}`).join(' / ')}
+                                </span>
+                              </>
                             )}
                           </button>
                         </li>
                       );
                     })}
                   </ul>
+                </div>
+
+                {/* Nivel de superficie: cota en el centro del polígono. */}
+                <div className="rounded-md border border-gray-200 p-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-gray-700">
+                      Nivel de superficie
+                    </span>
+                    <span
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${roofOk
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-700'
+                        }`}
+                    >
+                      {roofStatus?.label ?? 'Sin definir'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={surfaceValue}
+                      onChange={(e) => setSurfaceValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveSurfaceLevel();
+                        }
+                      }}
+                      placeholder="+7.50"
+                      disabled={busy || !!mode}
+                      aria-label="Nivel de superficie"
+                      className="min-w-0 flex-1 px-2 py-1 rounded-md border border-gray-300 text-[11px] tabular-nums focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveSurfaceLevel}
+                      disabled={busy || !!mode || !surfaceValue.trim()}
+                      className="px-2 py-1 rounded-md bg-brand-blue text-white text-[11px] font-semibold transition hover:bg-brand-hover disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      Aplicar
+                    </button>
+                    {hasSurfaceLevel && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveSurfaceLevel}
+                        disabled={busy || !!mode}
+                        title="Quitar nivel de superficie"
+                        aria-label="Quitar nivel de superficie"
+                        className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-40 disabled:pointer-events-none"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {hasSurfaceLevel && !roofOk && (
+                    <div className="text-[10px] text-amber-700">
+                      Falta el nivel del segundo lado: no se genera techo curvo.
+                    </div>
+                  )}
                 </div>
 
                 {(selectedPoly.niveles || []).length > 0 && (
@@ -2686,7 +2905,7 @@ export const GeometriaViewer = ({
                           const len = formatMeters(sideLength(a, b));
 
                           const label = linked
-                            ? `L${i} · ${len} · ${linkedSides.get(i).join(' / ')}`
+                            ? `L${i} · ${len} · ${linkedSides.get(i).map((t) => `N${t}`).join(' / ')}`
                             : `L${i} · ${len}`;
 
                           const w = Math.max(24, label.length * 5.6 + 10);
@@ -2986,6 +3205,72 @@ export const GeometriaViewer = ({
 
                     </Group>
                   );
+                })}
+
+
+                {/* ---- NIVELES DE SUPERFICIE (cota en el centro) ---- */}
+
+                {poligonos.flatMap((poly) => {
+                  const valor = poly.nivel_superficie;
+
+                  if (valor === null || valor === undefined) {
+                    return [];
+                  }
+
+                  const numero = Number(valor);
+
+                  if (!Number.isFinite(numero)) {
+                    return [];
+                  }
+
+                  const pts = normalizePoints(poly.puntos);
+
+                  if (pts.length < 3) {
+                    return [];
+                  }
+
+                  const centro = polygonCentroid(pts);
+                  const [sx, sy] = transformPoint(centro.x, centro.y);
+                  const label = `N${formatLevelText(numero)}`;
+                  const w = Math.max(48, label.length * 6.4 + 14);
+                  const h = 20;
+
+                  return [
+                    <Group
+                      key={`surface-level-${poly.id}`}
+                      x={sx}
+                      y={sy}
+                      listening={false}
+                    >
+                      <Rect
+                        x={-w / 2}
+                        y={-h / 2}
+                        width={w}
+                        height={h}
+                        fill={COLORS.levelLinked}
+                        stroke="#fff"
+                        strokeWidth={1}
+                        cornerRadius={4}
+                        shadowColor="#0f172a"
+                        shadowBlur={4}
+                        shadowOpacity={0.25}
+                        shadowOffsetY={1}
+                      />
+
+                      <Text
+                        text={label}
+                        x={-w / 2}
+                        y={-h / 2}
+                        width={w}
+                        height={h}
+                        align="center"
+                        verticalAlign="middle"
+                        fontSize={10}
+                        fontStyle="bold"
+                        fill="#fff"
+                      />
+                    </Group>,
+                  ];
                 })}
 
 

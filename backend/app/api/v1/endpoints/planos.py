@@ -337,6 +337,37 @@ def eliminar_poligono(id: int, id_poligono: str, db: Session = Depends(get_db)) 
 
 
 # ------------------------------------------------------------
+# NIVEL DE SUPERFICIE (cota en el centro)
+# ------------------------------------------------------------
+
+
+@modelos2d_router.patch("/{id}/poligonos/{id_poligono}/nivel-superficie")
+def fijar_nivel_superficie(
+    id: int,
+    id_poligono: str,
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Body: { "valor": número|null }. Con null se quita el nivel."""
+    try:
+        if "valor" not in payload:
+            raise ValueError("El campo 'valor' es obligatorio (null para quitarlo).")
+
+        poligono = EditorModelo2DService.fijar_nivel_superficie(
+            db,
+            id_modelo2d=id,
+            id_poligono=id_poligono,
+            valor=payload.get("valor"),
+        )
+        return {
+            "mensaje": "Nivel de superficie guardado correctamente.",
+            "poligono": poligono,
+        }
+    except ValueError as err:
+        raise _http_error(err)
+
+
+# ------------------------------------------------------------
 # VÉRTICES
 # ------------------------------------------------------------
 
@@ -507,5 +538,13 @@ def validar_modelo2d(id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "cantidad_niveles": len(modelo.get("cotas_altura") or []),
         "poligonos_sin_pendiente": [
             p.get("id") for p in poligonos if not (p.get("pendiente") or {}).get("definida")
+        ],
+        # Aviso (no bloquea): hay nivel de superficie pero falta el nivel del
+        # segundo lado, así que no se genera cubierta parabólica.
+        "poligonos_nivel_superficie_incompleto": [
+            p.get("id")
+            for p in poligonos
+            if p.get("nivel_superficie") is not None
+            and len(p.get("niveles") or []) == 1
         ],
     }

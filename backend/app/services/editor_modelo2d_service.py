@@ -342,6 +342,9 @@ class EditorModelo2DService:
             "nivel_bajo": None,
             "nivel_medio": None,
             "nivel_alto": None,
+            # Cota en el centro del polígono. Junto con dos niveles de lados
+            # genera la cubierta parabólica (el tipo de techo se deduce).
+            "nivel_superficie": None,
             "pendiente": None,
             "tipo_cubierta": tipo_cubierta,
             "origen": "manual",
@@ -879,6 +882,41 @@ class EditorModelo2DService:
             raise ValueError("No se pudo eliminar el nivel.")
 
         return {"mensaje": "Nivel eliminado correctamente.", "nivel": nivel}
+
+    @classmethod
+    @_con_lock_modelo
+    def fijar_nivel_superficie(
+        cls,
+        db: Session,
+        id_modelo2d: int,
+        id_poligono: str,
+        valor: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fija (o quita, con `valor=None`) la cota del nivel de superficie del
+        polígono: la altura en el centro, entre los dos lados con nivel.
+
+        No se guarda el tipo de techo: junto con los niveles de los lados,
+        el generador 3D deduce si la cubierta es plana, inclinada o
+        parabólica.
+        """
+        modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
+        poligono = cls._buscar(poligonos, id_poligono, "polígono")
+
+        if len(poligono.get("puntos") or []) < 3:
+            raise ValueError(
+                f"El polígono '{id_poligono}' debe tener al menos 3 vértices."
+            )
+
+        if valor is None:
+            poligono["nivel_superficie"] = None
+        else:
+            poligono["nivel_superficie"] = cls._validar_valor_nivel(valor)
+
+        if not cls._guardar(db, id_modelo2d, modelo, poligonos, niveles):
+            raise ValueError("No se pudo guardar el nivel de superficie.")
+
+        return poligono
 
     # =========================================================
     # ASOCIAR / DESASOCIAR NIVEL <-> LADO DE POLÍGONO

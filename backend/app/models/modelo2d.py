@@ -8,6 +8,12 @@ class Modelo2D(Base):
     __tablename__ = 'modelo2d'
 
     id_modelo2d = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Cada polígono de `poligonos` puede incluir "nivel_superficie": la cota
+    # en el centro del polígono (número) o None. Junto con los niveles de dos
+    # lados genera la cubierta parabólica; el tipo de techo NO se guarda, se
+    # deduce de estos datos. Al ser JSONB no requiere migración: si el campo
+    # falta, el comportamiento es el anterior.
     poligonos = Column(JSONB, nullable=True)
     lineas = Column(JSONB, nullable=True)
     capas = Column(JSONB, nullable=True)
