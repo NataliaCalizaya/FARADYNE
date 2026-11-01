@@ -1431,7 +1431,7 @@ export const GeometriaViewer = ({
     }
   };
 
-  const handleDisassociateLevel = async () => {
+  const handleDisassociateLevel = async (link = null) => {
     if (!selectedLevel || !idModelo2D) {
       setError('Seleccione el nivel que desea desasociar.');
       return;
@@ -1439,15 +1439,38 @@ export const GeometriaViewer = ({
 
     const links = selectedLevel.asociaciones || [];
 
-    // Si no hay superficie elegida y el nivel tiene una sola, se usa esa.
-    const polyId =
-      selectedPoly?.id ?? (links.length === 1 ? links[0].id_poligono : null);
+    let polyId = link?.id_poligono ?? null;
+    let lado = link?.lado ?? null;
+
+    if (!polyId && selectedPoly && levelIsLinkedTo(selectedLevel, selectedPoly.id)) {
+      polyId = selectedPoly.id;
+      if (lado === null && selectedSide !== null) {
+        const match = links.find(
+          (a) =>
+            String(a.id_poligono) === String(polyId) &&
+            Number(a.lado) === Number(selectedSide)
+        );
+        if (match) lado = match.lado;
+      }
+    }
+
+    if (!polyId && links.length === 1) {
+      polyId = links[0].id_poligono;
+      lado = links[0].lado;
+    }
 
     if (!polyId) {
-      setError(
-        'Seleccione la superficie de la que desea desasociar el nivel.'
-      );
+      setError('Seleccione la superficie de la que desea desasociar el nivel.');
       return;
+    }
+
+    if (lado === null) {
+      const asociadas = links.filter((a) => String(a.id_poligono) === String(polyId));
+      if (asociadas.length > 1 && selectedSide === null) {
+        setError('Hay varios lados asociados: use el botón de desvincular de la línea correspondiente.');
+        return;
+      }
+      if (asociadas.length === 1) lado = asociadas[0].lado;
     }
 
     if (!levelIsLinkedTo(selectedLevel, polyId)) {
@@ -1456,14 +1479,15 @@ export const GeometriaViewer = ({
     }
 
     const { ok } = await runMutation(
-      () => planosApi.disassociateNivel(idModelo2D, polyId, selectedLevel.id),
+      () => planosApi.disassociateNivel(idModelo2D, polyId, selectedLevel.id, lado),
       'No se pudo desasociar el nivel.'
     );
 
     if (ok) {
       setInfo(
-        `Nivel ${selectedLevel.texto ?? selectedLevel.valor} desasociado. ` +
-        'El nivel se conserva y puede asociarse de nuevo.'
+        `Nivel ${selectedLevel.texto ?? selectedLevel.valor} desasociado` +
+        (lado !== null && lado !== undefined ? ` (lado ${lado})` : '') +
+        '. El nivel se conserva y puede asociarse de nuevo.'
       );
     }
   };
@@ -2627,9 +2651,19 @@ export const GeometriaViewer = ({
                         className="flex items-center gap-1.5 text-gray-700"
                       >
                         <Link className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span className="truncate">
+                        <span className="truncate flex-1">
                           {a.id_poligono} · lado {a.lado}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDisassociateLevel(a)}
+                          disabled={toolsLocked || !!mode}
+                          className="text-gray-400 hover:text-red-600 transition shrink-0"
+                          aria-label={`Desasociar lado ${a.lado}`}
+                          title="Desasociar este lado"
+                        >
+                          <Unlink className="w-3 h-3" />
+                        </button>
                       </li>
                     ))}
                   </ul>

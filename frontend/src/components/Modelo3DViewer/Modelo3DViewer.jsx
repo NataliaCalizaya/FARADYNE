@@ -177,6 +177,32 @@ function collectLevelLabels(meta) {
     );
   }
 
+  // Cotas de nivel de superficie (centro de cada cubierta), igual que las
+  // cotas de los lados de los poligonos.
+  (meta.regions || []).forEach((r) => {
+    const raw = r?.nivel_superficie;
+    const val = num(
+      typeof raw === 'object' && raw !== null ? raw.valor ?? raw.value : raw
+    );
+    if (val === null) return;
+    const pts = r?.footprint || r?.puntos || r?.points || [];
+    if (!Array.isArray(pts) || !pts.length) return;
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    pts.forEach((p) => {
+      const x = Array.isArray(p) ? p[0] : p?.x;
+      const y = Array.isArray(p) ? p[1] : p?.y;
+      if (Number.isFinite(Number(x)) && Number.isFinite(Number(y))) {
+        sx += Number(x);
+        sy += Number(y);
+        n += 1;
+      }
+    });
+    if (!n) return;
+    push(val, sx / n, sy / n);
+  });
+
   return out;
 }
 
@@ -471,7 +497,7 @@ export const Modelo3DViewer = forwardRef(({
   const [selectedId, setSelectedId] = useState(null);
   const [darkMode, setDarkMode] = useState(false); // arranca en modo claro
   const [tooltip, setTooltip] = useState(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [showHint, setShowHint] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 

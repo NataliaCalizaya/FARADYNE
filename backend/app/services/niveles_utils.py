@@ -442,13 +442,15 @@ class NivelesUtils:
             y = float(nivel.get("y", 0.0))
 
             vigentes: List[Dict[str, Any]] = []
-            vistos = set()
+            # Se deduplica por (poligono, lado): un mismo nivel puede estar
+            # asociado a varios lados del mismo poligono.
+            vistos_par = set()
 
             for asociacion in nivel.get("asociaciones") or []:
                 pid = str(asociacion.get("id_poligono"))
                 poligono = indice.get(pid)
 
-                if poligono is None or pid in vistos:
+                if poligono is None:
                     continue
 
                 puntos = poligono.get("puntos") or []
@@ -461,9 +463,12 @@ class NivelesUtils:
                 if lado is None or not 0 <= lado < len(puntos):
                     lado = cls.lado_mas_cercano(puntos, x, y)["lado"]
 
+                if (pid, lado) in vistos_par:
+                    continue
+
                 info = cls.lado_info(puntos, lado, x, y)
 
-                vistos.add(pid)
+                vistos_par.add((pid, lado))
                 vigentes.append({"id_poligono": pid, "lado": lado})
 
                 copia = {

@@ -374,6 +374,26 @@ const OPCIONES_IMAGEN = [
 const CLAVES_IMAGEN = OPCIONES_IMAGEN.map((o) => o.key);
 const SIN_CAPTURAS = Object.fromEntries(CLAVES_IMAGEN.map((k) => [k, null]));
 
+const CACHE_CAPTURAS_KEY = (id) => `memoriaCapturas:${id}`;
+const leerCacheCapturas = (id) => {
+  try {
+    const raw = sessionStorage.getItem(CACHE_CAPTURAS_KEY(id));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !parsed.capturas) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+const escribirCacheCapturas = (id, capturas) => {
+  try {
+    sessionStorage.setItem(CACHE_CAPTURAS_KEY(id), JSON.stringify({ capturas, ts: Date.now() }));
+  } catch {
+    /* ignore */
+  }
+};
+
 // Selección inicial: lo que llevaba la memoria antes (plano + isométrica + frontal).
 const SELECCION_INICIAL = {
   plano: true, iso: true, iso_der: false, caballera: false, militar: false, front: true, top: false, side: false,
@@ -472,6 +492,8 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
   const [fase, setFase] = useState('idle');          // 'idle' | 'capturando' | 'listo'
   const [estado2d, setEstado2d] = useState('espera'); // 'espera' | 'ok' | 'error'
   const [estado3d, setEstado3d] = useState('espera');
+  const [capturado2d, setCapturado2d] = useState(false);
+  const [capturado3d, setCapturado3d] = useState(false);
   const [capturas, setCapturas] = useState(SIN_CAPTURAS);
   const [seleccion, setSeleccion] = useState(leerSeleccion);
 
@@ -501,6 +523,8 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
     const hay2d = Boolean(d?.ids?.id_modelo2d);
     const hay3d = Boolean(d?.ids?.id_modelo3d);
     setCapturas(SIN_CAPTURAS);
+    setCapturado2d(!hay2d);
+    setCapturado3d(!hay3d);
     if (!hay2d && !hay3d) {
       setFase('listo');
       return;
@@ -512,38 +536,85 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
 
   // Al llegar los datos arranca la captura.
   useEffect(() => {
-    if (datos) iniciarCaptura(datos);
-  }, [datos, iniciarCaptura]);
+    if (!datos) return;
+    const cache = leerCacheCapturas(idProyecto);
+    if (cache?.capturas) {
+      setCapturas(cache.capturas);
+      setFase('listo');
+      setCapturado2d(true);
+      setCapturado3d(true);
+    } else {
+      iniciarCaptura(datos);
+    }
+  }, [datos, iniciarCaptura, idProyecto]);
 
-  // Cuando los dos visores avisaron (o fallaron), se capturan las imágenes.
+  // Captura independiente del plano 2D apenas esté listo (no espera al 3D).
   useEffect(() => {
-    if (fase !== 'capturando') return undefined;
-    if (estado2d === 'espera' || estado3d === 'espera') return undefined;
+    if (fase !== 'capturando' || capturado2d) return undefined;
+    if (estado2d === 'espera') return undefined;
 
     const t = setTimeout(() => {
-      const nuevas = { ...SIN_CAPTURAS };
-      if (estado2d === 'ok') {
-        try {
-          nuevas.plano = ref2d.current?.capturarImagen({ pixelRatio: 2 }) || null;
-        } catch (err) {
-          console.error('[Memoria] Falló la captura del plano 2D:', err);
+      setCapturas((prev) => {
+        const nuevas = { ...prev };
+        if (estado2d === 'ok') {
+          try {
+            nuevas.plano = ref2d.current?.capturarImagen({ pixelRatio: 2 }) || null;
+          } catch (err) {
+            console.error('[Memoria] Falló la captura del plano 2D:', err);
+          }
         }
-      }
+        return nuevas;
+      });
+      setCapturado2d(true);
+    }, 100);
+
+    return () => clearTimeout(t);
+  }, [fase, estado2d, capturado2d]);
+
+  // Captura independiente de las vistas 3D apenas esté listo (no espera al 2D).
+  useEffect(() => {
+    if (fase !== 'capturando' || capturado3d) return undefined;
+    if (estado3d === 'espera') return undefined;
+
+    let cancelled = false;
+    const run = async () => {
+      await new Promise((r) => setTimeout(r, 100));
+      if (cancelled) return;
+      const nuevas = {};
       if (estado3d === 'ok') {
-        VISTAS_CAPTURA.forEach(({ key }) => {
+        for (const { key } of VISTAS_CAPTURA) {
+          await new Promise((r) => setTimeout(r, 16));
+          if (cancelled) return;
           try {
             nuevas[key] = ref3d.current?.capturarVista(key, CAPTURA_3D) || null;
           } catch (err) {
             console.error(`[Memoria] Falló la captura 3D (${key}):`, err);
+            nuevas[key] = null;
           }
-        });
+          setCapturas((prev) => ({ ...prev, ...nuevas }));
+        }
       }
-      setCapturas(nuevas);
-      setFase('listo'); // desmonta los visores
-    }, 200);
+      setCapturado3d(true);
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [fase, estado3d, capturado3d]);
 
+  // Cuando ambas capturas terminaron, desmontar los visores.
+  useEffect(() => {
+    if (fase !== 'capturando') return undefined;
+    if (!capturado2d || !capturado3d) return undefined;
+    const t = setTimeout(() => setFase('listo'), 50);
     return () => clearTimeout(t);
-  }, [fase, estado2d, estado3d]);
+  }, [fase, capturado2d, capturado3d]);
+
+  // Persistir capturas en sessionStorage para que aparezcan en la vista previa
+  // aunque se recargue la página.
+  useEffect(() => {
+    if (fase === 'listo' && capturas && Object.values(capturas).some(Boolean)) {
+      escribirCacheCapturas(idProyecto, capturas);
+    }
+  }, [fase, capturas, idProyecto]);
 
   // Si un visor no avisa a tiempo, se abandona: queda "Imagen no disponible".
   useEffect(() => {

@@ -12,6 +12,41 @@ const FACTORES_POR_DEFECTO = {
   factor_e: '1.0',
 };
 
+const aFactorString = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(1) : '1.0';
+};
+
+const CACHE_KEY = (id) => `nivelProteccion:${id}`;
+
+const leerCache = (id) => {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY(id));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const escribirCache = (id, data) => {
+  try {
+    sessionStorage.setItem(CACHE_KEY(id), JSON.stringify(data));
+  } catch {
+    /* sin almacenamiento: se ignora */
+  }
+};
+
+const borrarCache = (id) => {
+  try {
+    sessionStorage.removeItem(CACHE_KEY(id));
+  } catch {
+    /* ignore */
+  }
+};
+
 // Encabezado numerado, igual al usado dentro de NivelProteccionForm, para que
 // los 7 pasos del cálculo se vean como una única secuencia visual.
 const PasoHeader = ({ numero, titulo, colorClass = 'bg-brand-blue' }) => (
@@ -38,48 +73,84 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
   // guardar) siga apareciendo recién después del cálculo completo.
   const [datosProyecto, setDatosProyecto] = useState(null);
 
-  // Este paso siempre arranca en blanco: acá NUNCA hay todavía un Nivel de
-  // Protección guardado para el proyecto (recién se crea al final, al
-  // apretar "Guardar"), así que no tiene sentido pedirlo acá — solo generaba
-  // un 404 esperado en cada carga de página. Ese GET
-  // (nivelesProteccionApi.getNivelProteccionByProyecto) debería usarse en el
-  // paso de Ubicación de Mástiles, que sí necesita el nivel ya guardado
-  // (radio de esfera, nivel elegido, etc.).
-
-  // useEffect(() => {
-  //   let activo = true;
-
-  //   const cargarExistente = async () => {
-  //     try {
-  //       const existente = await nivelesProteccionApi.getNivelProteccionByProyecto(idProyecto);
-  //       if (!activo) return;
-  //       setInitialFactores({
-  //         factor_a: aFactorString(existente.factores_riesgo.a),
-  //         factor_b: aFactorString(existente.factores_riesgo.b),
-  //         factor_c: aFactorString(existente.factores_riesgo.c),
-  //         factor_d: aFactorString(existente.factores_riesgo.d),
-  //         factor_e: aFactorString(existente.factores_riesgo.e),
-  //       });
-  //       setNivelSeleccionado(existente.nivel_proteccion_seleccionado);
-  //     } catch (err) {
-  //       if (!activo) return;
-  //       if (err.response?.status !== 404) {
-  //         console.error('Error al obtener el nivel de protección existente:', err);
-  //       }
-  //       setInitialFactores(FACTORES_POR_DEFECTO);
-  //     } finally {
-  //       if (activo) setCargandoExistente(false);
-  //     }
-  //   };
-
-  //   cargarExistente();
-  //   return () => {
-  //     activo = false;
-  //   };
-  // }, [idProyecto]);
+  // Recuperación desde cache (crash/reload) + carga desde BD.
   useEffect(() => {
-    setInitialFactores(FACTORES_POR_DEFECTO);
-    setCargandoExistente(false);
+    let activo = true;
+    setCargandoExistente(true);
+
+    const cargar = async () => {
+      const cache = leerCache(idProyecto);
+      if (cache) {
+        if (cache.factores) setInitialFactores(cache.factores);
+        if (cache.resultado) setResultado(cache.resultado);
+        if (cache.nivelSeleccionado) setNivelSeleccionado(cache.nivelSeleccionado);
+      }
+
+      let existente = null;
+      try {
+        existente = await nivelesProteccionApi.getNivelProteccionByProyecto(idProyecto);
+      } catch (err) {
+        if (err?.response?.status !== 404) {
+          console.error('Error al obtener el nivel de protección existente:', err);
+        }
+        existente = null;
+      }
+
+      if (!activo) return;
+
+      const factoresGuardados = existente
+        ? {
+            factor_a: aFactorString(existente.factores_riesgo?.a),
+            factor_b: aFactorString(existente.factores_riesgo?.b),
+            factor_c: aFactorString(existente.factores_riesgo?.c),
+            factor_d: aFactorString(existente.factores_riesgo?.d),
+            factor_e: aFactorString(existente.factores_riesgo?.e),
+          }
+        : null;
+
+      if (existente) {
+        setInitialFactores(factoresGuardados);
+        setNivelSeleccionado(existente.nivel_proteccion_seleccionado);
+      } else if (!cache) {
+        setInitialFactores(FACTORES_POR_DEFECTO);
+        setNivelSeleccionado(null);
+      }
+
+      try {
+        const preview = await nivelesProteccionApi.calcularNivelProteccion({
+          id_proyecto: idProyecto,
+          ...(existente
+            ? factoresGuardados
+            : (cache?.factores || FACTORES_POR_DEFECTO)),
+        });
+        if (!activo) return;
+        setDatosProyecto({
+          longitud: preview.longitud,
+          anchura: preview.anchura,
+          altura: preview.altura,
+          densidad_ng: preview.densidad_ng,
+        });
+        if (existente) {
+          setResultado(preview);
+          setNivelSeleccionado((prev) => prev || preview.nivel_proteccion_recomendado);
+          escribirCache(idProyecto, {
+            factores: factoresGuardados,
+            resultado: preview,
+            nivelSeleccionado: existente.nivel_proteccion_seleccionado,
+          });
+        }
+      } catch (err) {
+        if (!activo) return;
+        console.error('Error al obtener los datos base (L/W/H/Ng) del proyecto:', err);
+      }
+
+      if (activo) setCargandoExistente(false);
+    };
+
+    cargar();
+    return () => {
+      activo = false;
+    };
   }, [idProyecto]);
 
   // Nombre + localidad del proyecto, para mostrar junto al Ng adoptado
@@ -106,45 +177,25 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
     };
   }, [idProyecto]);
 
-  // L/W/H + Ng adoptado (Paso 1): se piden con /calcular (que no persiste
-  // nada) usando factores neutros, porque L/W/H/Ng no dependen de los
-  // factores A-E — solo Nc y el nivel recomendado sí. Así el Paso 1 ya
-  // aparece completo apenas se entra al paso, sin tocar el botón de calcular
-  // del Paso 2 ni disparar el Paso 7 (que sigue atado a `resultado`).
-  useEffect(() => {
-    let activo = true;
-
-    const cargarDatosBase = async () => {
-      try {
-        const preview = await nivelesProteccionApi.calcularNivelProteccion({
-          id_proyecto: idProyecto,
-          ...FACTORES_POR_DEFECTO,
-        });
-        if (!activo) return;
-        setDatosProyecto({
-          longitud: preview.longitud,
-          anchura: preview.anchura,
-          altura: preview.altura,
-          densidad_ng: preview.densidad_ng,
-        });
-      } catch (err) {
-        if (!activo) return;
-        console.error('Error al obtener los datos base (L/W/H/Ng) del proyecto:', err);
-      }
-    };
-
-    cargarDatosBase();
-    return () => {
-      activo = false;
-    };
-  }, [idProyecto]);
-
   const handleCalculated = (data) => {
     setResultado(data);
     // Al recalcular (cambio de factores) se preserva la elección manual del
     // usuario (o la ya guardada); solo se inicializa con el recomendado
     // cuando todavía no hay ninguna elección.
     setNivelSeleccionado((prev) => prev || data.nivel_proteccion_recomendado);
+
+    const factoresCache = {
+      factor_a: aFactorString(data.factores_riesgo?.a),
+      factor_b: aFactorString(data.factores_riesgo?.b),
+      factor_c: aFactorString(data.factores_riesgo?.c),
+      factor_d: aFactorString(data.factores_riesgo?.d),
+      factor_e: aFactorString(data.factores_riesgo?.e),
+    };
+    escribirCache(idProyecto, {
+      factores: factoresCache,
+      resultado: data,
+      nivelSeleccionado: nivelSeleccionado || data.nivel_proteccion_recomendado,
+    });
   };
 
   const handleGuardar = async () => {
@@ -161,6 +212,7 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
         factor_e: resultado.factores_riesgo.e,
         nivel_seleccionado: nivelSeleccionado,
       });
+      borrarCache(idProyecto);
       if (onCalculated) onCalculated(saved);
       if (onNext) onNext();
     } catch (err) {
@@ -233,9 +285,11 @@ export const NivelProteccion = ({ idProyecto, onCalculated, onNext }) => {
       <div className="card-hover bg-white border border-gray-200 rounded-md">
         <div className="p-4">
           <NivelProteccionForm
+            key={idProyecto}
             idProyecto={idProyecto}
             onCalculated={handleCalculated}
             initialFactores={initialFactores}
+            initialResultado={resultado}
           />
         </div>
       </div>

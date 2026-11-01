@@ -744,10 +744,21 @@ class EditorModelo2DService:
 
         pid = str(poligono.get("id"))
 
+        # Se conservan las asociaciones a otros lados del mismo poligono;
+        # solo se elimina un duplicado exacto (mismo poligono + mismo lado).
+        def _misma_asociacion(a: Any) -> bool:
+            try:
+                return (
+                    str(a.get("id_poligono")) == pid
+                    and int(a.get("lado")) == int(lado)
+                )
+            except (TypeError, ValueError, AttributeError):
+                return False
+
         asociaciones = [
             a
             for a in nivel.get("asociaciones") or []
-            if str(a.get("id_poligono")) != pid
+            if not _misma_asociacion(a)
         ]
         asociaciones.append({"id_poligono": pid, "lado": lado})
         nivel["asociaciones"] = asociaciones
@@ -957,22 +968,44 @@ class EditorModelo2DService:
         id_modelo2d: int,
         id_poligono: str,
         id_nivel: str,
+        lado: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Saca el nivel de ese polígono. Sirve para niveles reconocidos y
-        creados. El nivel NO se borra: queda sin asociar y se puede asociar
-        de nuevo (a otro polígono o lado) o eliminar con eliminar_nivel.
+        Saca el nivel de ese polígono (y, si se indica, de un lado concreto).
+        Sirve para niveles reconocidos y creados. El nivel NO se borra: queda
+        sin asociar y se puede asociar de nuevo (a otro polígono o lado) o
+        eliminar con eliminar_nivel.
         """
         modelo, poligonos, niveles = cls._cargar(db, id_modelo2d)
 
         cls._buscar(poligonos, id_poligono, "polígono")
         nivel = cls._buscar(niveles, id_nivel, "nivel")
 
-        nivel["asociaciones"] = [
-            a
-            for a in nivel.get("asociaciones") or []
-            if str(a.get("id_poligono")) != str(id_poligono)
-        ]
+        if lado is None:
+            nivel["asociaciones"] = [
+                a
+                for a in nivel.get("asociaciones") or []
+                if str(a.get("id_poligono")) != str(id_poligono)
+            ]
+        else:
+            try:
+                lado_int = int(lado)
+            except (TypeError, ValueError):
+                raise ValueError("El lado debe ser un número entero.")
+            def _mismo_lado(a):
+                try:
+                    return int(a.get("lado")) == lado_int
+                except (TypeError, ValueError):
+                    return False
+
+            nivel["asociaciones"] = [
+                a
+                for a in nivel.get("asociaciones") or []
+                if not (
+                    str(a.get("id_poligono")) == str(id_poligono)
+                    and _mismo_lado(a)
+                )
+            ]
 
         return cls._guardar(db, id_modelo2d, modelo, poligonos, niveles) or modelo
 

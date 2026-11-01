@@ -496,12 +496,22 @@ def asociar_nivel(
 
 @modelos2d_router.delete("/{id}/poligonos/{id_poligono}/niveles/{id_nivel}/desasociar")
 def desasociar_nivel(
-    id: int, id_poligono: str, id_nivel: str, db: Session = Depends(get_db)
+    id: int,
+    id_poligono: str,
+    id_nivel: str,
+    lado: Optional[int] = None,
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """El nivel no se borra: queda sin asociar y puede asociarse de nuevo."""
+    """El nivel no se borra: queda sin asociar y puede asociarse de nuevo.
+    Si se envía `lado`, solo se desasocia ese lado; si no, todos los lados
+    de ese polígono."""
     try:
         modelo = EditorModelo2DService.desasociar_nivel_poligono(
-            db, id_modelo2d=id, id_poligono=id_poligono, id_nivel=id_nivel
+            db,
+            id_modelo2d=id,
+            id_poligono=id_poligono,
+            id_nivel=id_nivel,
+            lado=lado,
         )
         return {
             "mensaje": "Nivel desasociado correctamente.",

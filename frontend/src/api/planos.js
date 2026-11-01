@@ -203,10 +203,13 @@ export const planosApi = {
     return response.data;
   },
 
-  /** El nivel NO se borra: queda sin asociar. */
-  disassociateNivel: async (idModelo2D, idPoligono, idNivel) => {
+  /** El nivel NO se borra: queda sin asociar. Si se pasa `lado`, solo ese lado. */
+  disassociateNivel: async (idModelo2D, idPoligono, idNivel, lado) => {
     const response = await apiClient.delete(
-      `/modelos2d/${idModelo2D}/poligonos/${idPoligono}/niveles/${idNivel}/desasociar`
+      `/modelos2d/${idModelo2D}/poligonos/${idPoligono}/niveles/${idNivel}/desasociar`,
+      (lado === undefined || lado === null)
+        ? undefined
+        : { params: { lado: Number(lado) } }
     );
     return response.data;
   },
