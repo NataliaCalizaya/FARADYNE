@@ -549,44 +549,63 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
   }, [datos, iniciarCaptura, idProyecto]);
 
   // Captura independiente del plano 2D apenas esté listo (no espera al 3D).
+  // Se reintenta hasta que el visor realmente pueda entregar la imagen (evita
+  // capturar antes de que react-konva haya terminado de dibujar).
   useEffect(() => {
     if (fase !== 'capturando' || capturado2d) return undefined;
-    if (estado2d === 'espera') return undefined;
-
-    const t = setTimeout(() => {
+    let cancelled = false;
+    const run = async () => {
+      const hay2d = Boolean(datos?.ids?.id_modelo2d);
+      if (!hay2d) { setCapturado2d(true); return; }
+      const deadline = Date.now() + TIMEOUT_CAPTURA_MS;
+      while (!cancelled && Date.now() < deadline) {
+        if (estado2d === 'ok' || estado2d === 'error') break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (cancelled) return;
       setCapturas((prev) => {
         const nuevas = { ...prev };
-        if (estado2d === 'ok') {
-          try {
-            nuevas.plano = ref2d.current?.capturarImagen({ pixelRatio: 2 }) || null;
-          } catch (err) {
-            console.error('[Memoria] Falló la captura del plano 2D:', err);
-          }
+        try {
+          nuevas.plano = ref2d.current?.capturarImagen({ pixelRatio: 2 }) || null;
+        } catch (err) {
+          console.error('[Memoria] Falló la captura del plano 2D:', err);
+          nuevas.plano = null;
         }
         return nuevas;
       });
       setCapturado2d(true);
-    }, 100);
-
-    return () => clearTimeout(t);
-  }, [fase, estado2d, capturado2d]);
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [fase, capturado2d, datos, estado2d]);
 
   // Captura independiente de las vistas 3D apenas esté listo (no espera al 2D).
+  // Se reintenta hasta que el visor realmente pueda entregar una vista (evita
+  // perder la captura cuando onReady no se dispara a la primera).
   useEffect(() => {
     if (fase !== 'capturando' || capturado3d) return undefined;
-    if (estado3d === 'espera') return undefined;
-
     let cancelled = false;
     const run = async () => {
-      await new Promise((r) => setTimeout(r, 100));
+      const hay3d = Boolean(datos?.ids?.id_modelo3d);
+      if (!hay3d) { setCapturado3d(true); return; }
+      const deadline = Date.now() + TIMEOUT_CAPTURA_MS;
+      while (!cancelled && Date.now() < deadline) {
+        if (ref3d.current) {
+          try {
+            const probe = ref3d.current.capturarVista('iso', { width: 64, height: 64, pixelRatio: 1 });
+            if (probe) break;
+          } catch { /* visor todavía no está listo */ }
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
       if (cancelled) return;
       const nuevas = {};
-      if (estado3d === 'ok') {
+      if (ref3d.current) {
         for (const { key } of VISTAS_CAPTURA) {
           await new Promise((r) => setTimeout(r, 16));
           if (cancelled) return;
           try {
-            nuevas[key] = ref3d.current?.capturarVista(key, CAPTURA_3D) || null;
+            nuevas[key] = ref3d.current.capturarVista(key, CAPTURA_3D) || null;
           } catch (err) {
             console.error(`[Memoria] Falló la captura 3D (${key}):`, err);
             nuevas[key] = null;
@@ -598,7 +617,7 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
     };
     run();
     return () => { cancelled = true; };
-  }, [fase, estado3d, capturado3d]);
+  }, [fase, capturado3d, datos]);
 
   // Cuando ambas capturas terminaron, desmontar los visores.
   useEffect(() => {
@@ -688,15 +707,15 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
   return (
     <div className="w-full space-y-4 px-3">
       <h1 className="workflow-title text-2xl font-bold font-condensed text-gray-900">
-        Memoria Descriptiva &amp; Documento Final
+        Memoria Tecnica &amp; Documento Final
       </h1>
 
       {/* Aviso paso */}
       <div className="workflow-notice p-3 bg-emerald-50/95 border border-emerald-200 text-emerald-800 rounded-md flex items-center gap-2 text-xs">
         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
         <div>
-          <strong>Paso 7 de 7 (FINAL):</strong> Vista previa de la Memoria Descriptiva
-          según Ley 19.587 / Decreto 351/79 e IRAM 2184.
+          <strong>Paso 7 de 7 (FINAL):</strong> Vista previa de la Memoria tecnica
+          según AEA 92305-1-4 e IRAM 2184-1.
         </div>
       </div>
 
@@ -728,13 +747,10 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
           <div className="bg-gradient-to-r from-slate-900 to-brand-blue p-5 text-white flex justify-between items-start gap-4">
             <div>
               <div className="text-[10px] uppercase tracking-widest text-blue-200 font-semibold">
-                Memoria Descriptiva
+                Memoria Tecnica
               </div>
               <div className="text-lg font-bold font-condensed">
                 Sistema de Protección contra Rayos (SPDA)
-              </div>
-              <div className="text-xs text-blue-100 mt-0.5">
-                Decreto 351/79 · Ley 19.587 · IRAM 2184
               </div>
             </div>
             <div className="bg-white/10 backdrop-blur px-3 py-2 rounded text-right border border-white/20 shrink-0">
@@ -788,7 +804,8 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
               <div className="space-y-2">
                 <p className="text-gray-500 text-[11px]">
                   Plano con la geometría validada y los {datos.mastiles?.length ?? 0} mástiles
-                  captores ubicados (Modelo 2D ID: {nvl(datos.ids?.id_modelo2d)}).
+                  captores ubicados. 
+                  {/* (Modelo 2D ID: {nvl(datos.ids?.id_modelo2d)}). */}
                 </p>
                 {seleccion.plano ? (
                   <ImagenCaptura
@@ -1025,7 +1042,7 @@ export const MemoriaDescriptiva = ({ projectData, idProyecto, idModelo2D, idMode
               </div>
               <p className="text-justify text-[11px]">
                El calculo de este informe se hizo conforme a las normativas de
-                seguridad laboral vigentes (Ley 19.587, Decreto 351/79 Anexo VI e IRAM 2184).
+                AEA 92305-1 a 4 e IRAM 2184-1.
               </p>
             </div>
 

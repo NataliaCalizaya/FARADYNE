@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
 from app.repositories.usuario_repository import UsuarioRepository
-from app.schemas.auth_schema import LoginRequest, RegistroRequest, TokenResponse, UsuarioResponse
+from app.schemas.auth_schema import LoginRequest, RegistroRequest, TokenResponse, UsuarioResponse, UsuarioUpdateRequest
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
@@ -39,6 +39,38 @@ def login_form(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 @router.get("/me", response_model=UsuarioResponse)
 def usuario_actual(usuario: Dict[str, Any] = Depends(get_current_user)):
     return usuario
+
+
+@router.patch("/me", response_model=UsuarioResponse)
+def actualizar_usuario_actual(
+    payload: UsuarioUpdateRequest,
+    db: Session = Depends(get_db),
+    usuario: Dict[str, Any] = Depends(get_current_user),
+):
+    # Cambio de contraseña requiere la actual.
+    if payload.password_nueva is not None:
+        if not payload.password_actual or not verify_password(payload.password_actual, usuario["password_hash"]):
+            raise HTTPException(status_code=400, detail="Contraseña actual incorrecta.")
+        new_hash = hash_password(payload.password_nueva)
+    else:
+        new_hash = None
+
+    # Email único.
+    if payload.email is not None and payload.email.lower() != usuario["email"].lower():
+        existente = UsuarioRepository.get_by_email(db, payload.email)
+        if existente and existente["id_usuario"] != usuario["id_usuario"]:
+            raise HTTPException(status_code=409, detail="Ya existe un usuario con ese email.")
+
+    updated = UsuarioRepository.update_usuario(
+        db,
+        id_usuario=usuario["id_usuario"],
+        nombre=payload.nombre,
+        email=payload.email,
+        password_hash=new_hash,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    return updated
 
 
 def _autenticar(db: Session, email: str, password: str) -> Dict[str, Any]:

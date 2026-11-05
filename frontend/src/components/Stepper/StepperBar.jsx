@@ -11,9 +11,10 @@ export const STEPS = [
   { id: 6, label: 'Memoria Descriptiva', desc: 'Documento final del proyecto.' },
 ];
 
-export const StepperBar = ({ currentStep, onStepChange, isGeometriaValidada = false }) => {
+export const StepperBar = ({ currentStep, onStepChange, isGeometriaValidada = false, onBackToDashboard }) => {
   const handlePrev = () => {
     if (currentStep > 0) onStepChange(currentStep - 1);
+    else if (onBackToDashboard) onBackToDashboard();
   };
 
   const handleNext = () => {
@@ -30,9 +31,9 @@ export const StepperBar = ({ currentStep, onStepChange, isGeometriaValidada = fa
       <button
         type="button"
         onClick={handlePrev}
-        disabled={currentStep === 0}
+        disabled={currentStep === 0 && !onBackToDashboard}
         className="w-9 h-9 shrink-0 rounded border border-gray-300 bg-white flex items-center justify-center text-gray-600 hover:bg-gray-50 hover:border-brand-blue/40 disabled:opacity-40 disabled:cursor-not-allowed transition"
-        title="Paso anterior"
+        title={currentStep === 0 ? 'Volver al dashboard' : 'Paso anterior'}
       >
         <ChevronLeft className="w-4 h-4" />
       </button>

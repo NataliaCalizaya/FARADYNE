@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTheme } from '../context/ThemeContext';
+import { LogoFaradyne } from './LogoFaradyne';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Zap, Moon, Sun, Loader2 } from 'lucide-react';
 
@@ -24,7 +26,7 @@ export function Workspace({ onLogout }) {
   const navigate = useNavigate();
 
   // ── Modo oscuro ─────────────────────────────────────────────────────────────
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDark: isDarkMode, toggle: toggleDarkMode } = useTheme();
 
   // ── Estado del proyecto (reemplaza los useState de App.jsx) ─────────────────
   const [idProyecto, setIdProyecto]             = useState(null);
@@ -44,6 +46,12 @@ export function Workspace({ onLogout }) {
 
   // ¿Este paso necesita ancho ampliado?
   const isWideStep = WIDE_STEPS.includes(currentStep);
+
+  // Guarda el último paso visitado para poder reanudar desde el dashboard.
+  useEffect(() => {
+    if (!idProyecto || idParam === 'nuevo') return;
+    proyectosApi.actualizarProyecto(idProyecto, { ultimo_paso: currentStep }).catch(() => {});
+  }, [idProyecto, currentStep, idParam]);
 
   // Navega al paso i — si todavía estamos en /nuevo usa el UUID real cuando ya lo tenemos
   const setCurrentStep = useCallback((i) => {
@@ -149,20 +157,25 @@ export function Workspace({ onLogout }) {
     <div className={`app-workspace min-h-screen bg-slate-100/70 flex flex-col font-sans ${isDarkMode ? 'dark-mode' : ''}`}>
 
       {/* Top Navbar Header */}
-      <header className="header-grid-bg bg-slate-900 text-white h-12 px-5 flex items-center justify-between border-b border-slate-800 shadow-md">
-        <div className="flex items-center gap-2">
-          <Zap className="w-5 h-5 text-brand-blue fill-brand-blue icon-pulse" />
-          <span className="font-condensed font-bold text-lg tracking-wider">FARADYNE</span>
+      <header className="header-grid-bg bg-brand-dark text-white h-12 px-5 flex items-center justify-between border-b border-slate-800 shadow-md">
+        <div className="flex items-center gap-3">
+          <LogoFaradyne />
           <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">v1.0.0</span>
         </div>
 
-        <div className="flex items-center gap-4 text-xs text-slate-300">
+        <div className="flex items-center gap-3 text-xs text-slate-300">
           <div className="hidden sm:flex items-center gap-1.5">
             <span className="text-slate-500">Proyecto:</span>
             <span className="bg-brand-blue/15 border border-brand-blue/40 text-white px-2.5 py-1 rounded-full font-semibold shadow-glow-sm">
               {projectData.nombre}
             </span>
           </div>
+          <button
+            onClick={() => navigate('/proyectos')}
+            className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-semibold transition"
+          >
+            Ir a dashboard
+          </button>
           <button
             onClick={onLogout}
             className="text-slate-400 hover:text-white text-[11px] underline"
@@ -177,6 +190,7 @@ export function Workspace({ onLogout }) {
         currentStep={currentStep}
         onStepChange={setCurrentStep}
         isGeometriaValidada={isGeometriaValidada}
+        onBackToDashboard={() => navigate('/proyectos')}
       />
 
       {/* Page Content Viewport
@@ -253,7 +267,7 @@ export function Workspace({ onLogout }) {
       {/* Botón de tema */}
       <button
         type="button"
-        onClick={() => setIsDarkMode((c) => !c)}
+        onClick={toggleDarkMode}
         className="theme-toggle fixed bottom-5 z-50 flex h-11 w-11 items-center justify-center rounded-full text-xs font-bold shadow-lg transition"
         aria-label={isDarkMode ? 'Activar modo claro' : 'Activar modo nocturno'}
         title={isDarkMode ? 'Cambiar a modo claro' : 'Cambiar a modo nocturno'}

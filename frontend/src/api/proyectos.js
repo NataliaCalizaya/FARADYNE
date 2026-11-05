@@ -70,6 +70,11 @@ export const proyectosApi = {
     const response = await apiClient.get(`/proyectos/${idProyecto}/ubicacion`);
     return response.data;
   },
+
+  eliminarProyecto: async (idProyecto) => {
+    await apiClient.delete(`/proyectos/${idProyecto}`);
+    return true;
+  },
 };
 
 export default proyectosApi;

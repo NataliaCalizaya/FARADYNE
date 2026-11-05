@@ -15,5 +15,6 @@ class Proyecto(Base):
     provincia = Column(String(150), nullable=True)
     localidad = Column(String(150), nullable=True)
     estado = Column(String(50), nullable=True, server_default='borrador')
+    ultimo_paso = Column(Integer, nullable=True, server_default='0')
     fecha_del_proyecto = Column(Date, nullable=True)
     id_usuario = Column(Integer, ForeignKey('usuario.id_usuario', ondelete='CASCADE'),nullable=True,index=True,)
