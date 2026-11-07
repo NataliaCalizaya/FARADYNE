@@ -25,3 +25,24 @@ class UsuarioRepository:
         commit_or_rollback(db)
         db.refresh(usuario)
         return to_dict(usuario)
+
+    @staticmethod
+    def update_usuario(
+        db: Session,
+        id_usuario: int,
+        nombre: Optional[str] = None,
+        email: Optional[str] = None,
+        password_hash: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        usuario = db.get(Usuario, id_usuario)
+        if usuario is None:
+            return None
+        if nombre is not None:
+            usuario.nombre = nombre
+        if email is not None:
+            usuario.email = email.lower()
+        if password_hash is not None:
+            usuario.password_hash = password_hash
+        commit_or_rollback(db)
+        db.refresh(usuario)
+        return to_dict(usuario)

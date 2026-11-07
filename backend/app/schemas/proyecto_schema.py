@@ -38,6 +38,7 @@ class ProyectoCompletoResponse(BaseModel):
     provincia: Optional[str] = None
     localidad: Optional[str] = None
     estado: str = "borrador"
+    ultimo_paso: int = 0
     fecha_creacion: Optional[date] = None
     fecha_del_proyecto: Optional[date] = None
     # IDs derivados — None si el proyecto aún no tiene ese artefacto

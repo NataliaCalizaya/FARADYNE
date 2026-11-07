@@ -57,7 +57,7 @@ NIVELES_TABLA_A1: Dict[str, Dict[str, Any]] = {
         "descripcion": "Nivel IV",
     },
 }
-
+DECIMALES=4
 
 def determine_margin_lateral(height: float) -> int:
     """Determina el margen lateral (3H o 1H) según Anexo G AEA 92305-11:
@@ -107,7 +107,7 @@ def calculate_equivalent_collection_area_ae(
 
 def calculate_direct_strikes_nd(density_ng: float, area_ae: float) -> float:
     """Nd = Ng * Ae * 10^-6  (descargas directas/año) — Anexo D."""
-    return round(density_ng * area_ae * 1e-6, 8)
+    return density_ng * area_ae * 1e-6
 
 
 def calculate_tolerable_frequency_nc(
@@ -119,7 +119,7 @@ def calculate_tolerable_frequency_nc(
     factor_e: float,
 ) -> float:
     """Nc = (A · B · C · D · E) · Nd — Anexo E."""
-    return round(factor_a * factor_b * factor_c * factor_d * factor_e * nd, 8)
+    return factor_a * factor_b * factor_c * factor_d * factor_e * nd
 
 
 def determine_nivel_recomendado(nd: float, nc: float) -> Dict[str, Any]:
@@ -138,7 +138,7 @@ def determine_nivel_recomendado(nd: float, nc: float) -> Dict[str, Any]:
             "nivel_recomendado": "IV",
             "eficiencia_e": None,
             "justificacion": (
-                f"Nd ({nd}) ≤ Nc ({nc}): según el inciso F.1 la estructura no "
+                f"Nd ({nd:.{DECIMALES}f}) ≤ Nc ({nc:.{DECIMALES}f}): según el inciso F.1 la estructura no "
                 "requiere SPCR obligatorio. Cualquier nivel de protección es "
                 "suficiente; se informa Nivel IV como referencia mínima."
             ),
@@ -162,7 +162,7 @@ def determine_nivel_recomendado(nd: float, nc: float) -> Dict[str, Any]:
         "nivel_recomendado": nivel,
         "eficiencia_e": round(eficiencia, 4),
         "justificacion": (
-            f"Nd ({nd}) > Nc ({nc}): se requiere SPCR. "
+            f"Nd ({nd:.{DECIMALES}f}) > Nc ({nc:.{DECIMALES}f}): se requiere SPCR. "
             f"E = 1 - (Nc/Nd) = {eficiencia:.4f} → Nivel {nivel} según Tabla F.1."
         ),
     }
@@ -219,10 +219,10 @@ class level_protection_service:
             "altura": height,
             "margen_lateral": margin_lateral,
             "formula_area_utilizada": formula_ae,
-            "area_equivalente_ae": ae,
-            "densidad_ng": density_ng,
-            "frecuencia_impactos_nd": nd,
-            "frecuencia_tolerable_nc": nc,
+            "area_equivalente_ae": round(ae, DECIMALES),
+            "densidad_ng": round(density_ng, DECIMALES),
+            "frecuencia_impactos_nd": round(nd, DECIMALES),
+            "frecuencia_tolerable_nc": round(nc, DECIMALES),
             "requiere_spcr": recomendacion["requiere_spcr"],
             "eficiencia_proteccion": recomendacion["eficiencia_e"],
             "nivel_proteccion_recomendado": nivel_recomendado,

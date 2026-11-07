@@ -49,6 +49,7 @@ class ProyectoRepository:
                 Proyecto.provincia,
                 Proyecto.localidad,
                 Proyecto.estado,
+                Proyecto.ultimo_paso,
                 Proyecto.fecha_creacion,
                 Proyecto.fecha_del_proyecto,
                 Plano.id_plano,
@@ -92,7 +93,7 @@ class ProyectoRepository:
         """Devuelve los proyectos del usuario, ordenados por fecha de creación desc."""
         stmt = (
             select(Proyecto)
-            .where(Proyecto.id_usuario == id_usuario)   
+            .where(Proyecto.id_usuario == id_usuario, Proyecto.estado != "eliminado")   
             .order_by(Proyecto.fecha_creacion.desc())
         )
         return [to_dict(p) for p in db.scalars(stmt).all()]
@@ -157,6 +158,7 @@ class ProyectoRepository:
         provincia: Optional[str] = None,
         localidad: Optional[str] = None,
         estado: Optional[str] = None,
+        ultimo_paso: Optional[int] = None,
         fecha_del_proyecto: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Actualiza los campos informados de un proyecto. None si no existe."""
@@ -180,9 +182,20 @@ class ProyectoRepository:
             proyecto.localidad = localidad
         if estado is not None:
             proyecto.estado = estado
+        if ultimo_paso is not None:
+            proyecto.ultimo_paso = ultimo_paso
         if fecha_del_proyecto is not None:
             proyecto.fecha_del_proyecto = _parse_fecha(fecha_del_proyecto)
 
         commit_or_rollback(db)
         db.refresh(proyecto)
         return to_dict(proyecto)
+
+    @staticmethod
+    def soft_delete_proyecto(db: Session, id_proyecto: int) -> bool:
+        proyecto = db.get(Proyecto, id_proyecto)
+        if proyecto is None:
+            return False
+        proyecto.estado = "eliminado"
+        commit_or_rollback(db)
+        return True

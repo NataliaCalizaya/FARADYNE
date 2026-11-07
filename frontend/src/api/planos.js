@@ -141,6 +141,19 @@ export const planosApi = {
     return response.data;
   },
 
+  /**
+   * Fija (o quita) la cota del nivel de superficie del polígono: la altura
+   * en el centro, entre los dos lados con nivel. Con `valor = null` se quita.
+   * No se guarda el tipo de techo: se deduce de los niveles.
+   */
+  setNivelSuperficie: async (idModelo2D, idPoligono, valor) => {
+    const response = await apiClient.patch(
+      `/modelos2d/${idModelo2D}/poligonos/${idPoligono}/nivel-superficie`,
+      { valor: valor === null || valor === undefined ? null : Number(valor) }
+    );
+    return response.data;
+  },
+
   // ==========================================================
   // NIVELES
   // ==========================================================
@@ -190,10 +203,13 @@ export const planosApi = {
     return response.data;
   },
 
-  /** El nivel NO se borra: queda sin asociar. */
-  disassociateNivel: async (idModelo2D, idPoligono, idNivel) => {
+  /** El nivel NO se borra: queda sin asociar. Si se pasa `lado`, solo ese lado. */
+  disassociateNivel: async (idModelo2D, idPoligono, idNivel, lado) => {
     const response = await apiClient.delete(
-      `/modelos2d/${idModelo2D}/poligonos/${idPoligono}/niveles/${idNivel}/desasociar`
+      `/modelos2d/${idModelo2D}/poligonos/${idPoligono}/niveles/${idNivel}/desasociar`,
+      (lado === undefined || lado === null)
+        ? undefined
+        : { params: { lado: Number(lado) } }
     );
     return response.data;
   },

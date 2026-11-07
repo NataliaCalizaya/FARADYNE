@@ -24,6 +24,7 @@ from app.models.nivel_de_proteccion import NivelDeProteccion
 from app.models.resultado_simulacion import ResultadoSimulacion
 from app.models.zona_ceraunica import ZonaCeraunica
 from app.models.memoria_descriptiva import MemoriaDescriptiva
+from app.models.material_catalogo import MaterialCatalogo 
 
 # 3. Asignas la metadata al target de Alembic
 target_metadata = Base.metadata

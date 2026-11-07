@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -19,6 +21,13 @@ class UsuarioResponse(BaseModel):
     nombre: str
     email: str
     fecha_creacion: datetime
+
+
+class UsuarioUpdateRequest(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=150, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password_actual: Optional[str] = None
+    password_nueva: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 
 class TokenResponse(BaseModel):

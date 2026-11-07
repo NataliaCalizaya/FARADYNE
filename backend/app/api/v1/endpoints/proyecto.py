@@ -38,6 +38,7 @@ class ProyectoUpdateRequest(BaseModel):
     localidad: Optional[str] = None
     fecha_del_proyecto: Optional[date] = None
     estado: Optional[str] = None
+    ultimo_paso: Optional[int] = None
 
 
 # ------------------------------------------------------------------ #
@@ -107,10 +108,23 @@ def actualizar_proyecto(
         localidad=payload.localidad,
         fecha_del_proyecto=payload.fecha_del_proyecto,
         estado=payload.estado,
+        ultimo_paso=payload.ultimo_paso,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado.")
     return _format_proyecto(updated)
+
+
+@router.delete("/{id_proyecto}", status_code=204)
+def eliminar_proyecto(
+    id_proyecto: int,
+    db: Session = Depends(get_db),
+    usuario: Dict[str, Any] = Depends(get_current_user),
+) -> None:
+    _get_proyecto_del_usuario(db, id_proyecto, usuario)
+    ok = ProyectoRepository.soft_delete_proyecto(db, id_proyecto)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado.")
 
 
 @router.get("/{id_proyecto}/ubicacion", response_model=ProyectoUbicacionResponse)
@@ -153,6 +167,7 @@ def obtener_proyecto_completo(
         "provincia": row.get("provincia"),
         "localidad": row.get("localidad"),
         "estado": row.get("estado", "borrador"),
+        "ultimo_paso": row.get("ultimo_paso", 0) or 0,
         "fecha_creacion": row.get("fecha_creacion"),
         "fecha_del_proyecto": row.get("fecha_del_proyecto"),
         "id_plano": str(row["id_plano"]) if row.get("id_plano") else None,
@@ -185,6 +200,7 @@ def _format_proyecto(row: Dict[str, Any]) -> Dict[str, Any]:
         "provincia": row.get("provincia"),
         "localidad": row.get("localidad"),
         "estado": row.get("estado", "borrador"),
+        "ultimo_paso": row.get("ultimo_paso", 0) or 0,
         "fecha_creacion": row.get("fecha_creacion"),
         "fecha_del_proyecto": row.get("fecha_del_proyecto"),
     }

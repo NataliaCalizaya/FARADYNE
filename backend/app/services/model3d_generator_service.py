@@ -164,6 +164,155 @@ def _as_level_point(nivel: Any) -> Optional[Dict[str, Any]]:
     return r[0] if r else None
 
 
+def _valor_nivel_superficie(region: Dict[str, Any]) -> Optional[float]:
+    """
+    Cota del nivel de superficie del polígono (altura en el centro).
+
+    Se guarda como número simple; por compatibilidad también se acepta
+    {"valor": ...}. Ausente o None = el polígono no tiene nivel de superficie.
+    """
+    valor = region.get("nivel_superficie")
+
+    if isinstance(valor, dict):
+        valor = valor.get("valor")
+
+    if valor is None or isinstance(valor, bool):
+        return None
+
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return None
+
+
+def _punto_medio_lado(
+    region: Dict[str, Any], lado: Any
+) -> Optional[Tuple[float, float]]:
+    """Punto medio del lado `lado`, o None si el índice no es válido."""
+    if not isinstance(lado, int) or isinstance(lado, bool):
+        return None
+
+    try:
+        pts = normalize_footprint(region)
+    except (ValueError, TypeError, KeyError):
+        return None
+
+    if not 0 <= lado < len(pts):
+        return None
+
+    a, b = pts[lado], pts[(lado + 1) % len(pts)]
+    return ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+
+
+def _curvatura(region: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Parámetros de la cubierta parabólica, o None si no corresponde.
+
+    Se activa con nivel de superficie + exactamente dos niveles en lados:
+        z(u) = z0·(1-u)(1-2u) + 4·zc·u(1-u) + z1·u(2u-1)
+
+    El eje une los puntos medios de los dos lados con nivel. `u` es la
+    proyección del punto sobre ese eje, normalizada con el rango min-max del
+    polígono (vale para polígonos no rectangulares). La altura es constante
+    en la dirección perpendicular al eje (cilindro parabólico).
+    """
+    zc = _valor_nivel_superficie(region)
+    levels = region.get("levels")
+
+    if not isinstance(levels, list) or not levels:
+        levels = [level["value"] for level in extract_region_levels(region)]
+
+    if zc is None or len(levels) != 2:
+        return None
+
+    # El eje se apoya en los dos lados con nivel. Primero se intenta con
+    # nivel_bajo/nivel_alto; si no traen el lado, se usan los niveles crudos.
+    candidatos = [
+        punto
+        for punto in (
+            _as_level_point(region.get("nivel_bajo")),
+            _as_level_point(region.get("nivel_alto")),
+        )
+        if punto and punto.get("lado") is not None
+    ]
+
+    if len(candidatos) != 2:
+        candidatos = [
+            punto
+            for punto in extract_region_levels(region)
+            if punto.get("lado") is not None
+        ]
+
+    if len(candidatos) != 2:
+        return None
+
+    bajo, alto = sorted(candidatos, key=lambda p: float(p["value"]))
+
+    p0 = _punto_medio_lado(region, bajo.get("lado"))
+    p1 = _punto_medio_lado(region, alto.get("lado"))
+
+    if p0 is None or p1 is None:
+        return None
+
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    largo = math.hypot(dx, dy)
+
+    if largo < 1e-9:
+        return None
+
+    ux, uy = dx / largo, dy / largo
+
+    try:
+        pts = normalize_footprint(region)
+    except (ValueError, TypeError, KeyError):
+        return None
+
+    if len(pts) < 3:
+        return None
+
+    ts = [(x - p0[0]) * ux + (y - p0[1]) * uy for x, y in pts]
+    tmin, tmax = min(ts), max(ts)
+    ancho = tmax - tmin
+
+    if ancho < 1e-9:
+        return None
+
+    z0 = float(bajo["value"])
+    z1 = float(alto["value"])
+
+    def z_function(x: float, y: float) -> float:
+        t = (x - p0[0]) * ux + (y - p0[1]) * uy
+        u = (t - tmin) / ancho
+        u = 0.0 if u < 0.0 else 1.0 if u > 1.0 else u
+
+        z = (
+            z0 * (1.0 - u) * (1.0 - 2.0 * u)
+            + 4.0 * zc * u * (1.0 - u)
+            + z1 * u * (2.0 * u - 1.0)
+        )
+        return max(0.0, float(z))
+
+    muestras = [
+        z_function(p0[0] + ux * (tmin + ancho * k / 100.0),
+                   p0[1] + uy * (tmin + ancho * k / 100.0))
+        for k in range(101)
+    ]
+
+    return {
+        "z_function": z_function,
+        "p0": p0,
+        "ux": ux,
+        "uy": uy,
+        "tmin": tmin,
+        "tmax": tmax,
+        "z0": z0,
+        "z1": z1,
+        "zc": zc,
+        "zlow": min(muestras),
+        "zhigh": max(muestras),
+    }
+
+
 def _slope_direction(
     region: Dict[str, Any],
     bajo: Optional[Dict[str, Any]],
@@ -221,6 +370,11 @@ def prepare_region_levels(region: Dict[str, Any]) -> Dict[str, Any]:
     prepared["levels"] = [level["value"] for level in levels]
     prepared["level_points"] = levels
 
+    # Nivel de superficie (cota en el centro). Se normaliza a número o None:
+    # con dos niveles en lados genera la cubierta parabólica; solo, una
+    # cubierta plana a esa cota.
+    prepared["nivel_superficie"] = _valor_nivel_superficie(region)
+
     bajo = _as_level_point(region.get("nivel_bajo"))
     alto = _as_level_point(region.get("nivel_alto"))
 
@@ -257,6 +411,10 @@ def top_plane(
     baja linealmente hasta el lado bajo. Sin dirección se usa el plano
     z = A*x + B*y + C por dos puntos.
 
+    Si la región tiene nivel de superficie (ver `_curvatura`), la cubierta
+    deja de ser plana: con dos niveles en lados es parabólica y con ningún
+    nivel en lados es plana a la cota de superficie.
+
     Si la región heredó la caída de una vecina (slope_override, ver
     inherit_neighbor_slopes), se usa ese plano directamente.
 
@@ -268,7 +426,33 @@ def top_plane(
         return override
 
     levels = region.get("levels", [])
+
+    if not isinstance(levels, list) or not levels:
+        levels = [level["value"] for level in extract_region_levels(region)]
+
     pair = region.get("slope_pair", [])
+
+    # ========================================================
+    # CUBIERTA PARABÓLICA
+    # ========================================================
+
+    # Nivel de superficie + exactamente dos niveles en lados: cilindro
+    # parabólico entre ambos lados, con la cota del centro como vértice.
+    curva = _curvatura(region)
+
+    if curva is not None:
+        return curva["z_function"], curva["zlow"], curva["zhigh"]
+
+    # ========================================================
+    # CUBIERTA PLANA A LA COTA DE SUPERFICIE
+    # ========================================================
+
+    # Nivel de superficie y ningún nivel en lados: techo plano a esa cota.
+    superficie = _valor_nivel_superficie(region)
+
+    if superficie is not None and not levels:
+        z = max(0.0, superficie)
+        return (lambda x, y: z, z, z)
 
     # ========================================================
     # CUBIERTA INCLINADA
@@ -421,6 +605,11 @@ def _tiene_pendiente(r: Dict[str, Any]) -> bool:
     pendiente: puede heredar la caída de su vecina.
     """
     if r.get("slope_override"):
+        return True
+
+    # El nivel de superficie define el techo (plano o parabólico): no debe
+    # heredar la caída de una cubierta vecina.
+    if _valor_nivel_superficie(r) is not None:
         return True
 
     pair = r.get("slope_pair", [])
@@ -587,6 +776,9 @@ def inherit_neighbor_slopes(
 
 MAX_RING_VERTICES = 2000
 
+# Paso (m) de la malla de la cara superior de una cubierta curva.
+CURVA_PASO_MALLA = 0.5
+
 
 def _densificar_anillo(pts, zfun, tol=0.01, max_depth=10):
     """
@@ -728,6 +920,72 @@ def _triangulate_top(poly_d: Polygon) -> List[List[Tuple[float, float]]]:
     return tris
 
 
+def _triangulate_top_curva(
+    poly_d: Polygon,
+    curva: Dict[str, Any],
+    paso: float = CURVA_PASO_MALLA,
+) -> List[List[Tuple[float, float]]]:
+    """
+    Triangula la cara superior de una cubierta parabólica por franjas
+    perpendiculares al eje de curvatura.
+
+    z(x, y) depende solo de la coordenada a lo largo del eje, así que cada
+    franja se aproxima con una banda de ancho <= `paso` (0.5 m): la superficie
+    se ve curva y las franjas vecinas comparten un borde de altura constante.
+    """
+    ux, uy = curva["ux"], curva["uy"]
+    px, py = -uy, ux
+    ox, oy = curva["p0"]
+    tmin, tmax = curva["tmin"], curva["tmax"]
+    ancho = max(tmax - tmin, 1e-9)
+
+    coords = list(poly_d.exterior.coords)
+
+    if len(coords) < 3:
+        return []
+
+    s_vals = [(x - ox) * px + (y - oy) * py for x, y in coords]
+    smin, smax = min(s_vals) - 1.0, max(s_vals) + 1.0
+
+    paso = max(float(paso), 0.05)
+    franjas = max(1, int(math.ceil(ancho / paso)))
+    tris: List[List[Tuple[float, float]]] = []
+
+    for i in range(franjas):
+        ta = tmin + ancho * i / franjas
+        tb = tmin + ancho * (i + 1) / franjas
+
+        if tb - ta < 1e-9:
+            continue
+
+        esquinas = [
+            (ox + ux * ta + px * smin, oy + uy * ta + py * smin),
+            (ox + ux * tb + px * smin, oy + uy * tb + py * smin),
+            (ox + ux * tb + px * smax, oy + uy * tb + py * smax),
+            (ox + ux * ta + px * smax, oy + uy * ta + py * smax),
+        ]
+
+        try:
+            recorte = poly_d.intersection(Polygon(esquinas))
+        except Exception:
+            continue
+
+        if recorte.is_empty:
+            continue
+
+        piezas = list(recorte.geoms) if hasattr(recorte, "geoms") else [recorte]
+
+        for pieza in piezas:
+            if pieza.geom_type != "Polygon" or pieza.area <= 1e-9:
+                continue
+
+            for tri in _triangulate_top(pieza):
+                if len(tri) == 3:
+                    tris.append(tri)
+
+    return tris
+
+
 def add_prism_with_roof(region: Dict[str, Any]) -> Dict[str, Any]:
     vacio = {"id": region.get("id"), "faces": [], "vertices": []}
 
@@ -761,6 +1019,9 @@ def add_prism_with_roof(region: Dict[str, Any]) -> Dict[str, Any]:
 
     # PLANO DE TECHO
     zfun, zlow, zhigh = top_plane(region)
+
+    # Cubierta parabólica: la cara superior se subdivide en franjas.
+    curva = _curvatura(region)
 
     base = 0.0
 
@@ -812,7 +1073,12 @@ def add_prism_with_roof(region: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     # TAPAS SUPERIOR E INFERIOR
-    for tri in _triangulate_top(poly_d):
+    if curva is not None:
+        top_tris = _triangulate_top_curva(poly_d, curva)
+    else:
+        top_tris = _triangulate_top(poly_d)
+
+    for tri in top_tris:
         top_triangle = [(x, y, float(zfun(x, y))) for x, y in tri]
         bottom_triangle = [(x, y, base) for x, y in tri]
 

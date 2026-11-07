@@ -481,6 +481,7 @@ export const UbicacionMastiles = ({
   }, []);
 
   const coverageReq = useRef(0);
+  const coverageTimer = useRef(null);
 
   const loadCoverage = useCallback(async () => {
     if (!idProyecto) return;
@@ -496,6 +497,15 @@ export const UbicacionMastiles = ({
     }
   }, [idProyecto]);
 
+  // Recalculo diferido de cobertura (evita una llamada por cada movimiento).
+  const scheduleCoverage = useCallback(() => {
+    if (coverageTimer.current) clearTimeout(coverageTimer.current);
+    coverageTimer.current = setTimeout(() => {
+      coverageTimer.current = null;
+      loadCoverage();
+    }, 600);
+  }, [loadCoverage]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -507,13 +517,16 @@ export const UbicacionMastiles = ({
         const m2dId = await resolveModelo2D();
         if (cancelled) return;
 
+        // La cobertura no depende de la geometría: se pide en paralelo.
+        const coverageTask = loadCoverage();
+
         if (!m2dId) {
           if (idModelo3DProp) {
             setIdModelo3D(idModelo3DProp);
-            await loadMasts(idModelo3DProp);
-            await loadCoverage();
+            await Promise.all([loadMasts(idModelo3DProp), coverageTask]);
             setError('No se encontró el Modelo 2D. Se muestra el Modelo 3D disponible, pero para ubicar mástiles debe completar el paso de geometría.');
           } else {
+            await coverageTask;
             setError('No se encontró el Modelo 2D. Asegúrese de haber completado el paso anterior.');
           }
           return;
@@ -523,8 +536,9 @@ export const UbicacionMastiles = ({
         if (cancelled) return;
 
         if (m3dId) {
-          await loadMasts(m3dId);
-          await loadCoverage();
+          await Promise.all([loadMasts(m3dId), coverageTask]);
+        } else {
+          await coverageTask;
         }
       } catch (err) {
         if (!cancelled) {
@@ -538,6 +552,13 @@ export const UbicacionMastiles = ({
 
     return () => { cancelled = true; };
   }, [resolveModelo2D, resolveModelo3D, loadMasts, loadCoverage, idModelo3DProp]);
+
+  // Limpieza del timer de cobertura diferida.
+  useEffect(() => {
+    return () => {
+      if (coverageTimer.current) clearTimeout(coverageTimer.current);
+    };
+  }, []);
 
   // ── Colocar: un clic crea el mástil (sin modal) ──────────────────
 
@@ -561,7 +582,7 @@ export const UbicacionMastiles = ({
 
       // Nueva referencia: el Modelo3DViewer se actualiza solo (recibe `masts`).
       setMasts((prev) => [...prev, newMast]);
-      loadCoverage();
+      scheduleCoverage();
     } catch (err) {
       console.error('[UbicacionMastiles] Error creando mástil:', err);
       const detail = err?.response?.data?.detail;
@@ -583,7 +604,7 @@ export const UbicacionMastiles = ({
       await mastilesApi.deleteMastil(id);
       setMasts((prev) => prev.filter((m) => !sameId(m.id, id)));
       if (sameId(selectedMastId, id)) setSelectedMastId(null);
-      loadCoverage();
+      scheduleCoverage();
     } catch (err) {
       console.error('[UbicacionMastiles] Error eliminando mástil:', err);
       setError('No se pudo eliminar el mástil.');
@@ -599,7 +620,7 @@ export const UbicacionMastiles = ({
     try {
       const updated = await mastilesApi.updateMastil(id, { posicion_x: x, posicion_y: y });
       setMasts((prev) => prev.map((m) => (sameId(m.id, id) ? { ...m, ...updated } : m)));
-      loadCoverage();
+      scheduleCoverage();
     } catch (err) {
       console.error('[UbicacionMastiles] Error moviendo mástil:', err);
       setError('No se pudo guardar la nueva posición del mástil.');
@@ -622,7 +643,7 @@ export const UbicacionMastiles = ({
         if (!heightTimers.current[id]) {
           setMasts((prev) => prev.map((m) => (sameId(m.id, id) ? { ...m, ...updated } : m)));
         }
-        loadCoverage();
+        scheduleCoverage();
       } catch (err) {
         console.error('[UbicacionMastiles] Error actualizando altura:', err);
         setError('No se pudo actualizar la altura del mástil.');
@@ -636,6 +657,10 @@ export const UbicacionMastiles = ({
   };
 
   const handleConfirmarUbicacion = async () => {
+    if (coverageTimer.current) {
+      clearTimeout(coverageTimer.current);
+      coverageTimer.current = null;
+    }
     if (!idProyecto) return onNext?.();
     setConfirming(true);
     setError(null);

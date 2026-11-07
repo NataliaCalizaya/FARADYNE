@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+
 import { Workspace } from './components/Workspace';
+import { ProyectosDashboard } from './components/ProyectosDashboard';
 import { LoginForm } from './components/auth/LoginForm';
 import { RegisterForm } from './components/auth/RegisterForm';
 import { TOKEN_KEY, USER_KEY } from './api/client';
@@ -9,7 +11,7 @@ import { Zap } from 'lucide-react';
 export function App() {
   // Cada inicio de la aplicación muestra el login. La sesión se habilita
   // únicamente después de autenticar al usuario en esta ejecución.
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem(TOKEN_KEY)));
   const [modoAuth, setModoAuth] = useState('login');
 
 
@@ -120,11 +122,11 @@ export function App() {
 
           <div className="login-message relative z-10 max-w-md mt-10 lg:mt-0">
             <h1 className="login-headline font-sans font-semibold tracking-[-0.035em] text-3xl lg:text-5xl text-white leading-[1.04] mb-4">
-              Del plano al modelo 3D, con la precisión que exige la norma.
+              Del plano a la cobertura, en un solo flujo.
             </h1>
             <p className="login-copy text-sm text-slate-300 leading-relaxed max-w-sm">
-              Nivel de protección, ubicación de mástiles y memoria descriptiva,
-              en un mismo flujo de trabajo para el equipo de proyecto.
+              Nivel de protección, ubicación de mástiles y memoria tecnica,
+              en un mismo flujo de trabajo para el proyecto.
             </p>
           </div>
 
@@ -179,14 +181,11 @@ export function App() {
   // ── Rutas autenticadas ──────────────────────────────────────────────────────
   return (
     <Routes>
-      {/* Redirige la raíz a un proyecto nuevo en el paso inicial */}
-      <Route path="/" element={<Navigate to="/proyecto/nuevo/datos" replace />} />
-      {/* Conveniencia: /proyecto/nuevo → /proyecto/nuevo/datos */}
+      <Route path="/" element={<Navigate to="/proyectos" replace />} />
+      <Route path="/proyectos" element={<ProyectosDashboard onLogout={handleLogout} />} />
       <Route path="/proyecto/nuevo" element={<Navigate to="/proyecto/nuevo/datos" replace />} />
-      {/* Ruta principal: proyecto existente o nuevo, cualquier paso */}
       <Route path="/proyecto/:idParam/:paso" element={<Workspace onLogout={handleLogout} />} />
-      {/* Catch-all: cualquier URL desconocida vuelve a la raíz */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/proyectos" replace />} />
     </Routes>
   );
 }

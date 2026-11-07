@@ -1,5 +1,5 @@
 import React, {
-  useCallback, useEffect, useMemo, useRef, useState,
+  forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
 
 import {
@@ -130,7 +130,7 @@ const computeContentBox = (poligonos, niveles, base) => {
 // COMPONENTE
 // ============================================================
 
-export const GeometriaViewerMastiles = ({
+export const GeometriaViewerMastiles = forwardRef(({
   idModelo2D,
   masts = [],
   onMastClick = null,
@@ -142,7 +142,13 @@ export const GeometriaViewerMastiles = ({
   radioEsfera = 30,
   alturaNuevoMastil = null,
   className = '',
-}) => {
+  // ── Modo captura (memoria descriptiva) ──
+  soloLectura = false,         // sin toolbar, sin edición ni eventos, fondo blanco
+  width: fixedWidth = null,    // tamaño fijo del Stage en px; null = se adapta al contenedor
+  height: fixedHeight = null,
+  onReady = null,              // se llama cuando la geometría ya está dibujada
+  onError = null,              // se llama con el mensaje si no se pudo cargar
+}, ref) => {
 
   // ── Datos de la geometría ────────────────────────────────
   const [loading, setLoading] = useState(false);
@@ -157,12 +163,12 @@ export const GeometriaViewerMastiles = ({
   const [isPanning, setIsPanning] = useState(false);
   const [showPlan, setShowPlan] = useState(true); // líneas de fondo del plano
   const [stageDimensions, setStageDimensions] = useState({
-    width: 900,
-    height: MIN_STAGE_HEIGHT,
+    width: fixedWidth ?? 900,
+    height: fixedHeight ?? MIN_STAGE_HEIGHT,
   });
 
   // ── Grilla e imán ────────────────────────────────────────
-  const [showGrid, setShowGrid] = useState(true);
+  const [showGrid, setShowGrid] = useState(!soloLectura);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [gridIndex, setGridIndex] = useState(DEFAULT_GRID_INDEX);
   const [hoverNode, setHoverNode] = useState(null); // nodo bajo el cursor al colocar
@@ -178,6 +184,11 @@ export const GeometriaViewerMastiles = ({
   );
 
   const containerRef = useRef(null);
+  const stageRef = useRef(null);
+  const onReadyRef = useRef(onReady);
+  const onErrorRef = useRef(onError);
+  onReadyRef.current = onReady;
+  onErrorRef.current = onError;
   const isDraggingPan = useRef(false);
   const didPanRef = useRef(false);
   const panDistanceRef = useRef(0);
@@ -234,6 +245,36 @@ export const GeometriaViewerMastiles = ({
   }, [loadGeometry]);
 
 
+  // ── API imperativa para la memoria descriptiva ───────────
+
+  useImperativeHandle(ref, () => ({
+    /** PNG (dataURL) del plano con los mástiles; null si el visor aún no está listo. */
+    capturarImagen: ({ pixelRatio = 2 } = {}) => {
+      const stage = stageRef.current;
+      if (!stage) return null;
+      return stage.toDataURL({ pixelRatio, mimeType: 'image/png' });
+    },
+  }), []);
+
+  // Avisa cuando la geometría ya está cargada y dibujada (dos frames de margen
+  // para que react-konva termine de aplicar los nodos al Stage).
+  useEffect(() => {
+    if (loading || error || poligonos.length === 0) return undefined;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => onReadyRef.current?.());
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [loading, error, poligonos]);
+
+  useEffect(() => {
+    if (error) onErrorRef.current?.(error);
+  }, [error]);
+
+
   // ── Resize ───────────────────────────────────────────────
   // El contenedor no existe mientras se muestra el loader o el error, por eso
   // el efecto se vuelve a enganchar cuando cambian `loading` / `error`.
@@ -243,8 +284,9 @@ export const GeometriaViewerMastiles = ({
       const el = containerRef.current;
       if (!el) return;
 
-      const width = el.clientWidth || 900;
-      const height = Math.max(MIN_STAGE_HEIGHT, Math.round(window.innerHeight * 0.75));
+      const width = fixedWidth ?? (el.clientWidth || 900);
+      const height = fixedHeight
+        ?? Math.max(MIN_STAGE_HEIGHT, Math.round(window.innerHeight * 0.75));
 
       setStageDimensions((prev) =>
         prev.width === width && prev.height === height ? prev : { width, height }
@@ -264,7 +306,7 @@ export const GeometriaViewerMastiles = ({
       window.removeEventListener('resize', updateSize);
       if (observer) observer.disconnect();
     };
-  }, [loading, error]);
+  }, [loading, error, fixedWidth, fixedHeight]);
 
 
   // ── Transformación plano ↔ pantalla ─────────────────────
@@ -486,6 +528,7 @@ export const GeometriaViewerMastiles = ({
   };
 
   useEffect(() => {
+    if (soloLectura) return undefined; // en modo captura no hay atajos
     const onKeyDown = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -506,7 +549,7 @@ export const GeometriaViewerMastiles = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [soloLectura]);
 
 
   // ── Grilla (dibujada en un solo trazo por tipo de línea) ─
@@ -582,6 +625,7 @@ export const GeometriaViewerMastiles = ({
     <div className={`flex flex-col gap-2 ${className}`}>
 
       {/* ── Mini toolbar: grilla + plano + zoom + reset ── */}
+      {!soloLectura && (
       <div className="flex flex-wrap items-center gap-1.5 justify-end">
 
         {/* Indicador de modo colocación */}
@@ -685,6 +729,7 @@ export const GeometriaViewerMastiles = ({
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
       </div>
+      )}
 
       {/* ── Canvas ── */}
       <div
@@ -696,15 +741,28 @@ export const GeometriaViewerMastiles = ({
         <Stage
           width={stageDimensions.width}
           height={stageDimensions.height}
-          onWheel={handleWheel}
-          onMouseDown={handlePointerDown}
-          onMouseMove={handlePointerMove}
-          onMouseUp={handlePointerUp}
-          onMouseLeave={handlePointerLeave}
-          onClick={handleStageClick}
-          style={{ cursor: stageCursor }}
+          ref={stageRef}
+          onWheel={soloLectura ? undefined : handleWheel}
+          onMouseDown={soloLectura ? undefined : handlePointerDown}
+          onMouseMove={soloLectura ? undefined : handlePointerMove}
+          onMouseUp={soloLectura ? undefined : handlePointerUp}
+          onMouseLeave={soloLectura ? undefined : handlePointerLeave}
+          onClick={soloLectura ? undefined : handleStageClick}
+          style={{ cursor: soloLectura ? 'default' : stageCursor }}
         >
           <Layer>
+
+            {/* Fondo blanco: sin esto el PNG exportado queda transparente */}
+            {soloLectura && (
+              <Rect
+                x={0}
+                y={0}
+                width={stageDimensions.width}
+                height={stageDimensions.height}
+                fill="#ffffff"
+                listening={false}
+              />
+            )}
 
             {/* ── Grilla de ubicación (por debajo de todo) ── */}
             {showGrid && (
@@ -808,7 +866,7 @@ export const GeometriaViewerMastiles = ({
           </Layer>
 
           {/* ── Capa de marcadores de mástiles (encima de todo) ── */}
-          <Layer listening={!placing}>
+          <Layer listening={!placing && !soloLectura}>
             {masts.map((mast, idx) => {
               const [sx, sy] = transformPoint(
                 Number(mast.posicion_x),
@@ -826,7 +884,7 @@ export const GeometriaViewerMastiles = ({
                   key={mast.id || `mast-${idx}`}
                   x={sx}
                   y={sy}
-                  draggable={!placing}
+                  draggable={!placing && !soloLectura}
                   dragBoundFunc={mastDragBound}
                   onDragMove={(e) => handleMastDragMove(mast, e)}
                   onClick={(e) => {
@@ -900,6 +958,7 @@ export const GeometriaViewerMastiles = ({
       </div>
 
       {/* ── Leyenda ── */}
+      {!soloLectura && (
       <div className="flex flex-wrap items-center gap-3 text-[10px] text-gray-500">
         <span className="flex items-center gap-1">
           <span className="inline-block w-3 h-3 rounded-sm bg-[#1a6dba]" />
@@ -920,9 +979,12 @@ export const GeometriaViewerMastiles = ({
           {showGrid && ` · grilla ${gridStep} × ${gridStep} m, las líneas más gruesas marcan cada 5 m`}
         </span>
       </div>
+      )}
 
     </div>
   );
-};
+});
+
+GeometriaViewerMastiles.displayName = 'GeometriaViewerMastiles';
 
 export default GeometriaViewerMastiles;
